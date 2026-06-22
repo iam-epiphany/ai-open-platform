@@ -5,13 +5,13 @@ spring:
     name: hmdp
   datasource:
     driver-class-name: com.mysql.jdbc.Driver
-    url: jdbc:mysql://127.0.0.1:3306/hmdp?useSSL=false&serverTimezone=UTC
+    url: jdbc:mysql://127.0.0.1:3306/dawang-dianping?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true&useSSL=false
     username: root
-    password: 123
+    password: 20030226
   redis:
-    host: 192.168.150.101
-    port: 6379
-    password: 123321
+    host: localhost
+    port: 6370
+    password: 123456
     lettuce:
       pool:
         max-active: 10
@@ -25,3 +25,5 @@ mybatis-plus:
 logging:
   level:
     com.hmdp: debug
+  pattern:
+    dateformat: mm:ss.SSS
