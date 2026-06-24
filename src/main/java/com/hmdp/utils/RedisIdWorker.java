@@ -12,9 +12,10 @@ import java.time.format.DateTimeFormatter;
 public class RedisIdWorker {
     @Resource
     private StringRedisTemplate stringRedisTemplate;
+
     private static final long BEGIN_TIMESTAMP = 1767225600L ;
     private static final long COUNT_BITS = 32;
-    public long nextId(Long keyPrefix) {
+    public long nextId(String keyPrefix) {
         LocalDateTime now = LocalDateTime.now();
         long nowSecond = now.toEpochSecond(ZoneOffset.UTC);
         long timeStamp = nowSecond - BEGIN_TIMESTAMP;

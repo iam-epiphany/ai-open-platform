@@ -26,9 +26,9 @@ public class UploadController {
             String fileName = createNewFileName(originalFilename);
             // 保存文件
             image.transferTo(new File(SystemConstants.IMAGE_UPLOAD_DIR, fileName));
-            // 返回结果
+            // 返回结果（加上 /imgs 前缀，与数据库存储格式一致）
             log.debug("文件上传成功，{}", fileName);
-            return Result.ok(fileName);
+            return Result.ok("/imgs" + fileName);
         } catch (IOException e) {
             throw new RuntimeException("文件上传失败", e);
         }
@@ -36,7 +36,9 @@ public class UploadController {
 
     @GetMapping("/blog/delete")
     public Result deleteBlogImg(@RequestParam("name") String filename) {
-        File file = new File(SystemConstants.IMAGE_UPLOAD_DIR, filename);
+        // 路径示例: /imgs/blogs/0/a/uuid.jpg → 去掉 /imgs 前缀，得到 /blogs/0/a/uuid.jpg
+        String relativePath = filename.replaceFirst("^/imgs", "");
+        File file = new File(SystemConstants.IMAGE_UPLOAD_DIR, relativePath);
         if (file.isDirectory()) {
             return Result.fail("错误的文件名称");
         }
