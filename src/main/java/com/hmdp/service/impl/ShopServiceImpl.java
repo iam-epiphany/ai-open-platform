@@ -5,6 +5,8 @@ import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.hmdp.dto.Result;
 import com.hmdp.entity.Shop;
 import com.hmdp.mapper.ShopMapper;
@@ -46,12 +48,28 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
     @Resource
     private StringRedisTemplate stringRedisTemplate;
 
+    /**
+     * 本地缓存 L1（Caffeine）：热点商户数据驻留 JVM 内存，
+     * 进一步降低对 Redis 的访问压力；TTL 10 分钟，更新时主动失效。
+     */
+    private final Cache<Long, Shop> localCache = Caffeine.newBuilder()
+            .maximumSize(1000)
+            .expireAfterWrite(10, TimeUnit.MINUTES)
+            .build();
+
     @Override
     public Result queryById(Long id) {
-        //缓存穿透
-        //Shop shop = queryWithPassThrough(id);
-        //互斥解决缓存击穿
-        Shop shop = queryWithMutex(id);
+        //1. 查询本地缓存 L1（Caffeine）
+        Shop shop = localCache.getIfPresent(id);
+        if (shop != null) {
+            return Result.ok(shop);
+        }
+        //2. 未命中，查询 Redis L2（互斥锁防击穿 + 空值缓存防穿透）
+        shop = queryWithMutex(id);
+        if (shop != null) {
+            //3. 写回本地缓存
+            localCache.put(id, shop);
+        }
         return Result.ok(shop);
     }
 
@@ -72,8 +90,9 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         }
         //1更新数据库
         updateById(shop);
-        //2删除缓存
+        //2删除缓存：Redis L2 + 本地 L1 双清，保证多级缓存一致性
         stringRedisTemplate.delete(CACHE_SHOP_KEY + id);
+        localCache.invalidate(id);
         return Result.ok(shop);
     }
 

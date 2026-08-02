@@ -3,6 +3,7 @@ package com.hmdp.service.impl;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.bean.copier.CopyOptions;
 import cn.hutool.core.lang.UUID;
+import cn.hutool.core.util.BooleanUtil;
 import cn.hutool.core.util.RandomUtil;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.dto.LoginFormDTO;
@@ -20,6 +21,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
+import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpSession;
 
 import java.time.LocalDateTime;
@@ -53,6 +55,15 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         if (RegexUtils.isPhoneInvalid(phone)) {
             return Result.fail("手机号格式错误");
         }
+        //防短信轰炸：同一手机号 60s 内仅允许发送一次验证码
+        String limitKey = LOGIN_CODE_LIMIT_KEY + phone;
+        Long count = stringRedisTemplate.opsForValue().increment(limitKey);
+        if (count != null && count == 1L) {
+            stringRedisTemplate.expire(limitKey, LOGIN_CODE_LIMIT_TTL, TimeUnit.SECONDS);
+        }
+        if (count != null && count > 1L) {
+            return Result.fail("验证码发送过于频繁，请稍后再试");
+        }
         //符合生成验证码
         String code = RandomUtil.randomNumbers(6);
 
@@ -66,16 +77,22 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
     }
 
     @Override
-    public Result login(LoginFormDTO loginForm, HttpSession session) {
+    public Result login(LoginFormDTO loginForm, HttpSession session, HttpServletRequest request) {
         //校验手机号和验证码
         String phone = loginForm.getPhone();
         if (RegexUtils.isPhoneInvalid(phone)) {
             return Result.fail("手机号格式错误");
         }
+        //黑名单检查：被拉黑的手机号禁止登录
+        if (BooleanUtil.isTrue(stringRedisTemplate.hasKey(BLACKLIST_PHONE_KEY + phone))) {
+            return Result.fail("账号已被限制登录，请稍后再试");
+        }
         //从redis获取验证码
         String CacheCode = stringRedisTemplate.opsForValue().get(LOGIN_CODE_KEY + phone);
         String code = loginForm.getCode();
         if(CacheCode ==null || !code.equals(CacheCode)){
+            //登录失败计数，达到阈值拉黑（手机号 + 当前IP）
+            recordLoginFail(phone, getClientIp(request));
             return Result.fail("验证码错误");
         }
 
@@ -149,6 +166,54 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
             num>>>=1;
         }
         return Result.ok(count);
+    }
+
+    /**
+     * 记录登录失败：失败次数达到阈值后，将手机号和来源 IP 拉入黑名单（30 分钟）
+     */
+    private void recordLoginFail(String phone, String ip) {
+        String phoneFailKey = LOGIN_FAIL_KEY + "phone:" + phone;
+        Long phoneFailCount = stringRedisTemplate.opsForValue().increment(phoneFailKey);
+        if (phoneFailCount != null && phoneFailCount == 1L) {
+            stringRedisTemplate.expire(phoneFailKey, BLACKLIST_TTL, TimeUnit.MINUTES);
+        }
+        if (phoneFailCount != null && phoneFailCount >= LOGIN_FAIL_THRESHOLD) {
+            // 拉黑手机号，并清除失败计数
+            stringRedisTemplate.opsForValue().set(BLACKLIST_PHONE_KEY + phone, "1", BLACKLIST_TTL, TimeUnit.MINUTES);
+            stringRedisTemplate.delete(phoneFailKey);
+            log.warn("手机号登录失败次数过多，已拉黑: phone={}", phone);
+        }
+
+        // IP 维度同样计数拉黑
+        if (ip == null || ip.isEmpty()) {
+            return;
+        }
+        String ipFailKey = LOGIN_FAIL_KEY + "ip:" + ip;
+        Long ipFailCount = stringRedisTemplate.opsForValue().increment(ipFailKey);
+        if (ipFailCount != null && ipFailCount == 1L) {
+            stringRedisTemplate.expire(ipFailKey, BLACKLIST_TTL, TimeUnit.MINUTES);
+        }
+        if (ipFailCount != null && ipFailCount >= LOGIN_FAIL_THRESHOLD) {
+            stringRedisTemplate.opsForValue().set(BLACKLIST_IP_KEY + ip, "1", BLACKLIST_TTL, TimeUnit.MINUTES);
+            stringRedisTemplate.delete(ipFailKey);
+            log.warn("IP 登录失败次数过多，已拉黑: ip={}", ip);
+        }
+    }
+
+    /**
+     * 获取客户端真实 IP（兼容反向代理 X-Forwarded-For）
+     */
+    private String getClientIp(HttpServletRequest request) {
+        String ip = request.getHeader("X-Forwarded-For");
+        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
+            ip = request.getRemoteAddr();
+        } else {
+            int idx = ip.indexOf(',');
+            if (idx > 0) {
+                ip = ip.substring(0, idx);
+            }
+        }
+        return ip;
     }
 
     private User createUserWithPhone(String phone) {

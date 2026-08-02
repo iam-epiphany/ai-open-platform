@@ -1,6 +1,8 @@
 package com.hmdp.config;
 
+import com.hmdp.utils.BlackListInterceptor;
 import com.hmdp.utils.LoginInterceptor;
+import com.hmdp.utils.RateLimitInterceptor;
 import com.hmdp.utils.RefreshTokenInterceptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Configuration;
@@ -25,7 +27,15 @@ public class MvcConfig implements WebMvcConfigurer {
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
-        //登录拦截器
+        //1.黑名单拦截器：最先执行，命中黑名单直接拒绝（静态图片资源不受限）
+        registry.addInterceptor(new BlackListInterceptor(stringRedisTemplate))
+                .excludePathPatterns("/imgs/**").order(0);
+        //2.接口频控拦截器：IP+接口维度限流，防止脚本刷接口（静态图片资源不受限）
+        registry.addInterceptor(new RateLimitInterceptor(stringRedisTemplate))
+                .excludePathPatterns("/imgs/**").order(1);
+        //3.token刷新拦截器
+        registry.addInterceptor(new RefreshTokenInterceptor(stringRedisTemplate)).order(2);
+        //4.登录拦截器
         registry.addInterceptor(new LoginInterceptor())
                 .excludePathPatterns(
                         "/user/login",
@@ -36,8 +46,6 @@ public class MvcConfig implements WebMvcConfigurer {
                         "/upload/**",
                         "/voucher/**",
                         "/imgs/**"
-                ).order(1);
-        //token刷新拦截器
-        registry.addInterceptor(new RefreshTokenInterceptor(stringRedisTemplate)).order(0);
+                ).order(3);
     }
 }

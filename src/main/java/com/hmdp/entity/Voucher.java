@@ -79,6 +79,12 @@ public class Voucher implements Serializable {
     private Integer stock;
 
     /**
+     * 每人限购数量（仅秒杀/限购券使用，存于 tb_seckill_voucher）
+     */
+    @TableField(exist = false)
+    private Integer limitCount;
+
+    /**
      * 生效时间
      */
     @TableField(exist = false)

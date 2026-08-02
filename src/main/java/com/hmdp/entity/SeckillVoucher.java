@@ -38,6 +38,11 @@ public class SeckillVoucher implements Serializable {
     private Integer stock;
 
     /**
+     * 每人限购数量：1 表示一人一单（秒杀券）；&gt;1 表示限购券，同一用户最多购买 N 张
+     */
+    private Integer limitCount;
+
+    /**
      * 创建时间
      */
     private LocalDateTime createTime;

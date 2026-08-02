@@ -2,7 +2,10 @@ package com.hmdp.service.impl;
 
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.StrUtil;
+import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.hmdp.dto.Result;
 import com.hmdp.dto.ScrollResult;
 import com.hmdp.dto.UserDTO;
@@ -14,6 +17,7 @@ import com.hmdp.service.IBlogService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.service.IFollowService;
 import com.hmdp.service.IUserService;
+import com.hmdp.utils.RedisConstants;
 import com.hmdp.utils.SystemConstants;
 import com.hmdp.utils.UserHolder;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -25,9 +29,11 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import static com.hmdp.utils.RedisConstants.BLOG_LIKED_KEY;
+import static com.hmdp.utils.RedisConstants.CACHE_BLOG_KEY;
 import static com.hmdp.utils.RedisConstants.FEED_KEY;
 
 /**
@@ -66,12 +72,39 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
         return Result.ok(records);
     }
 
+    /**
+     * 热点笔记本地缓存 L1（Caffeine）：TTL 10 分钟，点赞/更新时主动失效
+     */
+    private final Cache<Long, Blog> blogLocalCache = Caffeine.newBuilder()
+            .maximumSize(1000)
+            .expireAfterWrite(10, TimeUnit.MINUTES)
+            .build();
+
     @Override
     public Result queryBlogById(Long id) {
-        Blog blog = getById(id);
+        //1. 查询本地缓存 L1（Caffeine）
+        Blog blog = blogLocalCache.getIfPresent(id);
+        //2. 未命中，查询 Redis L2
+        if (blog == null) {
+            String key = CACHE_BLOG_KEY + id;
+            String blogJson = stringRedisTemplate.opsForValue().get(key);
+            if (StrUtil.isNotBlank(blogJson)) {
+                blog = JSONUtil.toBean(blogJson, Blog.class);
+            } else {
+                //3. 两级缓存都未命中，查询数据库并回填
+                blog = getById(id);
+                if (blog != null) {
+                    stringRedisTemplate.opsForValue().set(key, JSONUtil.toJsonStr(blog), RedisConstants.CACHE_BLOG_TTL, TimeUnit.MINUTES);
+                }
+            }
+            if (blog != null) {
+                blogLocalCache.put(id, blog);
+            }
+        }
         if(blog == null){
             return Result.fail("笔记不存在");
         }
+        // 用户态信息（昵称/头像/是否点赞）实时查询，不参与缓存
         queryBlogUser(blog);
         isBlogLiked(blog);
         return Result.ok(blog);
@@ -105,12 +138,16 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
             if(isSuccess){
                 //更新redis
                 stringRedisTemplate.opsForZSet().add(key,userId.toString(),System.currentTimeMillis());
+                //点赞数变化，失效多级缓存
+                invalidateBlogCache(id);
             }
         }else {
             boolean isSuccess = update().setSql("liked = liked - 1").eq("id", id).update();
             if(isSuccess){
                 //更新redis
                 stringRedisTemplate.opsForZSet().remove(key,userId.toString());
+                //点赞数变化，失效多级缓存
+                invalidateBlogCache(id);
             }
         }
 
@@ -199,6 +236,14 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
         r.setMinTime(minTime);
 
         return Result.ok(r);
+    }
+
+    /**
+     * 失效笔记的多级缓存（本地 L1 + Redis L2）
+     */
+    private void invalidateBlogCache(Long id) {
+        blogLocalCache.invalidate(id);
+        stringRedisTemplate.delete(CACHE_BLOG_KEY + id);
     }
 
     private void queryBlogUser(Blog blog) {
