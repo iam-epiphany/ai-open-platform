@@ -9,13 +9,21 @@
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
     <groupId>com.hmdp</groupId>
-    <artifactId>hm-dianping</artifactId>
+    <artifactId>token-seckill</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <name>hm-dianping</name>
-    <description>Demo project for Spring Boot</description>
+    <name>token-seckill</name>
+    <description>大模型平台 Token 包秒杀系统（黑马点评改造）</description>
     <properties>
         <java.version>1.8</java.version>
     </properties>
+
+    <!-- canal 官方 jar 未发布到中央仓库/镜像，以项目内 file:// 仓库形式自包含引入（libs/repo/） -->
+    <repositories>
+        <repository>
+            <id>project-libs</id>
+            <url>file://${project.basedir}/libs/repo</url>
+        </repository>
+    </repositories>
     <dependencies>
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -94,10 +102,46 @@
             <artifactId>caffeine</artifactId>
             <version>2.9.3</version>
         </dependency>
-        <!--kafka 异步落库-->
+        <!--memcached 多级缓存 L2（xmemcached 客户端）-->
         <dependency>
-            <groupId>org.springframework.kafka</groupId>
-            <artifactId>spring-kafka</artifactId>
+            <groupId>com.googlecode.xmemcached</groupId>
+            <artifactId>xmemcached</artifactId>
+            <version>2.4.8</version>
+        </dependency>
+        <!--canal 客户端：binlog 驱动缓存同步（官方 1.1.7 未发布到 Maven 中央仓库/阿里云镜像，
+        从 GitHub Release canal.example-1.1.7.tar.gz 提取到 libs/canal/，
+        由 maven-install-plugin 在 validate 阶段自动装入本地仓库，见 <build> 配置）-->
+        <dependency>
+            <groupId>com.alibaba.otter.canal</groupId>
+            <artifactId>canal.client</artifactId>
+            <version>1.1.7</version>
+        </dependency>
+        <dependency>
+            <groupId>com.alibaba.otter.canal</groupId>
+            <artifactId>canal.protocol</artifactId>
+            <version>1.1.7</version>
+        </dependency>
+        <dependency>
+            <groupId>com.alibaba.otter.canal</groupId>
+            <artifactId>canal.common</artifactId>
+            <version>1.1.7</version>
+        </dependency>
+        <!-- canal 协议依赖：protobuf + fastjson（canal 官方 example 同款版本） -->
+        <dependency>
+            <groupId>com.google.protobuf</groupId>
+            <artifactId>protobuf-java</artifactId>
+            <version>3.6.1</version>
+        </dependency>
+        <dependency>
+            <groupId>com.alibaba</groupId>
+            <artifactId>fastjson</artifactId>
+            <version>1.2.69</version>
+        </dependency>
+        <!-- canal.common 依赖 commons-lang（NestableRuntimeException 等） -->
+        <dependency>
+            <groupId>commons-lang</groupId>
+            <artifactId>commons-lang</artifactId>
+            <version>2.6</version>
         </dependency>
     </dependencies>
 

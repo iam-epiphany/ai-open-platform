@@ -2,7 +2,7 @@ server:
   port: 8081
 spring:
   application:
-    name: hmdp
+    name: token-seckill
   datasource:
     driver-class-name: com.mysql.jdbc.Driver
     url: jdbc:mysql://127.0.0.1:3306/dawang-dianping?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true&useSSL=false
@@ -20,20 +20,6 @@ spring:
         time-between-eviction-runs: 10s
   jackson:
     default-property-inclusion: non_null # JSON处理时忽略非空字段
-  kafka:
-    bootstrap-servers: localhost:9092
-    producer:
-      key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.apache.kafka.common.serialization.StringSerializer
-      retries: 3
-    consumer:
-      group-id: seckill-order-consumer
-      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      enable-auto-commit: false # 手动提交 offset，保证消息不丢
-      auto-offset-reset: latest
-    listener:
-      ack-mode: manual # 手动 ACK，处理成功才提交
 mybatis-plus:
   type-aliases-package: com.hmdp.entity # 别名扫描包
 logging:
@@ -41,3 +27,21 @@ logging:
     com.hmdp: debug
   pattern:
     dateformat: mm:ss.SSS
+
+# ============ Memcached：多级缓存 L2 ============
+memcached:
+  servers: 127.0.0.1:11211
+  pool-size: 5
+  op-timeout: 2000 # 单次操作超时 ms
+
+# ============ Canal：binlog 驱动缓存同步 ============
+canal:
+  # 总开关：false 时停用 binlog 同步，写路径降级为 Cache Aside（手动删缓存）
+  enabled: true
+  server:
+    host: 127.0.0.1
+    port: 11111
+  destination: example
+  batch-size: 100
+  # 注意：YAML plain scalar 不做转义，此处为单反斜杠（Java 正则中 \. 匹配字面点）
+  filter: dawang-dianping\.tb_token_.*

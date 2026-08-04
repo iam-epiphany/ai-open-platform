@@ -1,5 +1,6 @@
 package com.hmdp.config;
 
+import com.hmdp.cache.ScopeCacheInterceptor;
 import com.hmdp.utils.BlackListInterceptor;
 import com.hmdp.utils.LoginInterceptor;
 import com.hmdp.utils.RateLimitInterceptor;
@@ -18,6 +19,9 @@ public class MvcConfig implements WebMvcConfigurer {
     @Autowired
     private StringRedisTemplate stringRedisTemplate;
 
+    @Autowired
+    private ScopeCacheInterceptor scopeCacheInterceptor;
+
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
         // 将 /imgs/** 请求映射到文件系统的图片目录，覆盖 blogs、icons 等所有子目录
@@ -27,6 +31,8 @@ public class MvcConfig implements WebMvcConfigurer {
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
+        //0.ScopeCaching 生命周期拦截器：最先执行，保证请求内缓存干净
+        registry.addInterceptor(scopeCacheInterceptor).order(-100);
         //1.黑名单拦截器：最先执行，命中黑名单直接拒绝（静态图片资源不受限）
         registry.addInterceptor(new BlackListInterceptor(stringRedisTemplate))
                 .excludePathPatterns("/imgs/**").order(0);
@@ -44,7 +50,8 @@ public class MvcConfig implements WebMvcConfigurer {
                         "/shop/**",
                         "/shop-type/**",
                         "/upload/**",
-                        "/voucher/**",
+                        "/token-sku/**",
+                        "/token-activity/**",
                         "/imgs/**"
                 ).order(3);
     }

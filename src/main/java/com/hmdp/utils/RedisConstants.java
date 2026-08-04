@@ -28,6 +28,31 @@ public class RedisConstants {
     public static final String SHOP_GEO_KEY = "shop:geo:";
     public static final String USER_SIGN_KEY = "sign:";
 
+    //============ Token 平台业务 ============
+    /** SKU 详情缓存 key：token:sku:{skuId}（多级缓存 L2/L3） */
+    public static final String TOKEN_SKU_KEY = "token:sku:";
+    public static final Long TOKEN_SKU_TTL = 30L;
+    /** 活动页聚合缓存 key：token:activity:{activityId} */
+    public static final String TOKEN_ACTIVITY_KEY = "token:activity:";
+    public static final Long TOKEN_ACTIVITY_TTL = 30L;
+    /** 用户权益缓存 key：token:quota:{userId}:{modelId} */
+    public static final String TOKEN_QUOTA_KEY = "token:quota:";
+    public static final Long TOKEN_QUOTA_TTL = 30L;
+    /** 秒杀预扣库存 key：token:stock:{skuId}（Redis 预扣，DB 为事实源） */
+    public static final String TOKEN_STOCK_KEY = "token:stock:";
+    /** 已领取用户集合 key：token:granted:{skuId} */
+    public static final String TOKEN_GRANTED_KEY = "token:granted:";
+    /** 限购计数 key：token:count:{skuId}:{userId} */
+    public static final String TOKEN_COUNT_KEY = "token:count:";
+    /** 限购计数 TTL（秒），活动窗口期足够 */
+    public static final Long TOKEN_COUNT_TTL = 604800L;
+    /** 发放订单 Redis Stream key / 消费组 / 消费者名 */
+    public static final String TOKEN_GRANT_STREAM_KEY = "token:grant:stream";
+    public static final String TOKEN_GRANT_GROUP = "token-grant-group";
+    public static final String TOKEN_GRANT_CONSUMER = "token-grant-c1";
+    /** JVM 本地缓存失效广播频道（Redis Pub/Sub，跨节点） */
+    public static final String CACHE_INVALIDATE_CHANNEL = "cache:invalidate";
+
     //============ 防刷频控 & 黑名单 ============
     /** 接口频控 key：rate:limit:{ip}:{uri} */
     public static final String RATE_LIMIT_KEY = "rate:limit:";

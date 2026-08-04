@@ -1,26 +1,56 @@
-# 本地一键启动 Kafka（KRaft 单节点，无需 Zookeeper）
-# 用法：docker compose up -d
+# 完整演示环境一键启动：MySQL(5.7, 开 binlog) + Redis + Memcached + Canal Server
+# 用法：docker compose up -d   （启动应用用 demo profile：mvn spring-boot:run -Dspring-boot.run.profiles=demo）
+# 说明：Canal 1.1.7 客户端不兼容 MySQL 9.x（mysql_native_password 被移除），
+#       故演示环境内置 MySQL 5.7（3307），不占用本机 3306
 services:
-  kafka:
-    image: apache/kafka:3.7.1
-    container_name: hmdp-kafka
+  mysql:
+    image: mysql:5.7
+    container_name: token-mysql
     ports:
-      - "9092:9092"
+      - "3307:3306"
     environment:
-      KAFKA_NODE_ID: 1
-      KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
-      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      MYSQL_ROOT_PASSWORD: "20030226"
+    command:
+      - --server-id=1
+      - --log-bin=mysql-bin
+      - --binlog-format=ROW
+      - --binlog-row-image=FULL
+      - --character-set-server=utf8mb4
+      # 兼容 hmdp.sql 中 timestamp 的 0000-00-00 默认值
+      - --sql-mode=STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION
+    volumes:
+      - ./docker/mysql/init:/docker-entrypoint-initdb.d
     healthcheck:
-      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p20030226"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: token-redis
+    ports:
+      - "6370:6379"
+    command: redis-server --requirepass 123456 --appendonly yes
+
+  memcached:
+    image: memcached:1.6-alpine
+    container_name: token-memcached
+    ports:
+      - "11211:11211"
+    command: memcached -m 64 -c 1024
+
+  canal-server:
+    image: canal/canal-server:v1.1.7
+    container_name: token-canal
+    ports:
+      - "11110:11110"
+      - "11111:11111"
+      - "11112:11112"
+    volumes:
+      # 只覆盖实例配置（canal.properties 用镜像内置官方版，auto.scan 自动发现 example 实例）
+      - ./docker/canal/conf/example/instance.properties:/home/admin/canal-server/conf/example/instance.properties
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: unless-stopped
