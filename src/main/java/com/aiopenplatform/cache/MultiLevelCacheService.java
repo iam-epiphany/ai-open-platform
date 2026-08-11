@@ -5,7 +5,6 @@ import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import lombok.extern.slf4j.Slf4j;
-import net.rubyeye.xmemcached.MemcachedClient;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
@@ -17,7 +16,7 @@ import static com.aiopenplatform.utils.RedisConstants.CACHE_NULL_TTL;
 import static com.aiopenplatform.utils.RedisConstants.CACHE_INVALIDATE_CHANNEL;
 
 /**
- * 多级缓存读写服务：ScopeCaching(L0) -&gt; JVM Caffeine(L1) -&gt; Memcache(L2) -&gt; Redis(L3) -&gt; MySQL(L4)
+ * 多级缓存读写服务：ScopeCaching(L0) -&gt; JVM Caffeine(L1) -&gt; Redis(L2) -&gt; MySQL(L3)
  * <p>
  * 读链路：请求进来逐级查询，未命中则回源下一级，最终回源 MySQL（loader）；
  * 回源成功后逐级写回。Redis 层用 SETNX 互斥锁防缓存击穿，空值短 TTL 防穿透。
@@ -37,12 +36,10 @@ public class MultiLevelCacheService {
     @Resource
     private JvmCaches jvmCaches;
     @Resource
-    private MemcachedClient memcachedClient;
-    @Resource
     private StringRedisTemplate stringRedisTemplate;
 
     /**
-     * 五级缓存读取：ScopeCaching -&gt; Caffeine -&gt; Memcache -&gt; Redis -&gt; MySQL(loader)
+     * 四级缓存读取：ScopeCaching -&gt; Caffeine -&gt; Redis -&gt; MySQL(loader)
      *
      * @param cacheName    缓存域（JvmCaches.CACHE_*）
      * @param key          缓存 key
@@ -68,27 +65,12 @@ public class MultiLevelCacheService {
             return t;
         }
 
-        // ============ L2 Memcache ============
-        try {
-            Object memValue = memcachedClient.get(key);
-            if (memValue != null) {
-                T t = JSONUtil.toBean((String) memValue, type);
-                jvmCaches.put(cacheName, key, (String) memValue);
-                scopeCaching.put(key, t);
-                log.debug("【缓存命中 L2 Memcache】key={}", key);
-                return t;
-            }
-        } catch (Exception e) {
-            // Memcache 故障降级：继续下一级，不阻断主链路
-            log.warn("Memcache 读取失败，降级到 Redis: key={}, err={}", key, e.getMessage());
-        }
-
-        // ============ L3 Redis ============
+        // ============ L2 Redis ============
         String redisJson = stringRedisTemplate.opsForValue().get(key);
         if (StrUtil.isNotBlank(redisJson)) {
             T t = JSONUtil.toBean(redisJson, type);
             writeBackToUpperLevels(cacheName, key, t, redisJson);
-            log.debug("【缓存命中 L3 Redis】key={}", key);
+            log.debug("【缓存命中 L2 Redis】key={}", key);
             return t;
         }
         if (redisJson != null) {
@@ -97,7 +79,7 @@ public class MultiLevelCacheService {
             return null;
         }
 
-        // ============ L4 MySQL 回源（互斥锁防击穿） ============
+        // ============ L3 MySQL 回源（互斥锁防击穿） ============
         return queryFromDbWithMutex(cacheName, key, type, loader, redisTtlSec);
     }
 
@@ -149,20 +131,15 @@ public class MultiLevelCacheService {
     }
 
     /**
-     * 回源/命中低层缓存后，向 L0/L1/L2 逐级写回
+     * 回源/命中低层缓存后，向 L0/L1 逐级写回
      */
     private <T> void writeBackToUpperLevels(String cacheName, String key, T t, String json) {
         scopeCaching.put(key, t);
         jvmCaches.put(cacheName, key, json);
-        try {
-            memcachedClient.set(key, 600, json); // Memcache 写回 TTL 10 分钟
-        } catch (Exception e) {
-            log.warn("Memcache 写回失败: key={}, err={}", key, e.getMessage());
-        }
     }
 
     /**
-     * 五级删除：本节点 L0/L1 直接删，L2/L3 共享层删除，并广播 JVM 失效事件给其他节点
+     * 四级删除：本节点 L0/L1 直接删，L2 共享层删除，并广播 JVM 失效事件给其他节点
      *
      * @param cacheName 缓存域
      * @param key       缓存 key
@@ -170,26 +147,16 @@ public class MultiLevelCacheService {
     public void delete(String cacheName, String key) {
         scopeCaching.remove(key);
         jvmCaches.invalidate(cacheName, key);
-        try {
-            memcachedClient.delete(key);
-        } catch (Exception e) {
-            log.warn("Memcache 删除失败: key={}, err={}", key, e.getMessage());
-        }
         stringRedisTemplate.delete(key);
         publishInvalidate(cacheName, key);
     }
 
     /**
-     * 写透传（Canal binlog 驱动）：详情类数据变更后，将新数据直接写入 L2/L3 共享层；
+     * 写透传（Canal binlog 驱动）：详情类数据变更后，将新数据直接写入 L2 共享层（Redis）；
      * L1 由广播失效事件处理，避免本地脏写。
      */
     public void writeThrough(String cacheName, String key, Object value, Long redisTtlSec) {
         String json = JSONUtil.toJsonStr(value);
-        try {
-            memcachedClient.set(key, 600, json);
-        } catch (Exception e) {
-            log.warn("Memcache 写透传失败: key={}, err={}", key, e.getMessage());
-        }
         stringRedisTemplate.opsForValue().set(key, json, redisTtlSec, TimeUnit.SECONDS);
         publishInvalidate(cacheName, key);
         log.info("【binlog 写透传】cacheName={}, key={}", cacheName, key);

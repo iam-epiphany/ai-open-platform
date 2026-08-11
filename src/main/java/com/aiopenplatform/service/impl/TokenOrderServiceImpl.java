@@ -75,7 +75,7 @@ public class TokenOrderServiceImpl extends ServiceImpl<TokenOrderMapper, TokenOr
     public Result grantToken(Long skuId) {
         Long userId = UserHolder.getUser().getId();
 
-        // 校验 SKU 与活动时间窗（SKU 详情走五级缓存，热点读）
+        // 校验 SKU 与活动时间窗（SKU 详情走四级缓存，热点读）
         TokenSku sku = tokenSkuService.getSkuWithCache(skuId);
         if (sku == null) {
             return Result.fail("Token 包不存在");

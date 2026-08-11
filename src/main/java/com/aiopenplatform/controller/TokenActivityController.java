@@ -12,7 +12,7 @@ import javax.annotation.Resource;
 
 /**
  * <p>
- * 平台活动页控制器（活动页聚合数据为热点读，走五级缓存）
+ * 平台活动页控制器（活动页聚合数据为热点读，走四级缓存）
  * </p>
  */
 @RestController

@@ -11,7 +11,7 @@ import com.aiopenplatform.entity.UserQuota;
 public interface IUserQuotaService extends IService<UserQuota> {
 
     /**
-     * 用户权益查询（多级缓存：ScopeCaching -&gt; Caffeine -&gt; Memcache -&gt; Redis -&gt; MySQL）
+     * 用户权益查询（多级缓存：ScopeCaching -&gt; Caffeine -&gt; Redis -&gt; MySQL）
      *
      * @param userId  用户 id
      * @param modelId 模型 id（0=通用池）

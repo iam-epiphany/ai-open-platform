@@ -41,7 +41,7 @@ import static com.aiopenplatform.utils.RedisConstants.AI_REQ_ID_TTL;
 /**
  * AI 开放接口：模型调用（模拟计费）
  * <p>
- * 调用链路：幂等（Redis SETNX）→ 模型校验 → 余额预检（五级缓存读）→ token 估算 →
+ * 调用链路：幂等（Redis SETNX）→ 模型校验 → 余额预检（四级缓存读）→ token 估算 →
  * 模拟生成回复 → 事务内「乐观锁扣减余额 + 写账本（change_type=2）+ 写调用日志」。
  * 余额扣减用一行条件更新（balance >= used）保证并发不超扣；扣减后权益缓存由 binlog（Canal）自动失效。
  * </p>
@@ -123,7 +123,7 @@ public class AiChatController {
         int promptTokens = estimatePromptTokens(dto.getPrompt());
         int completionTokens = estimateCompletionTokens(dto.getMaxTokens());
         long used = promptTokens + completionTokens;
-        // 5. 余额预检（五级缓存读，快速失败；最终裁决在事务内的 DB 条件更新）
+        // 5. 余额预检（四级缓存读，快速失败；最终裁决在事务内的 DB 条件更新）
         UserQuota quota = userQuotaService.getQuotaWithCache(user.getId(), dto.getModelId());
         if (quota == null || quota.getBalance() < used) {
             return Result.fail("余额不足，本次调用需要 " + used + " Tokens，请先领取 Token 包");

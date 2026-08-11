@@ -24,7 +24,7 @@ public class UserQuotaController {
     private IUserQuotaService userQuotaService;
 
     /**
-     * 我的 Token 权益（五级缓存热点读）
+     * 我的 Token 权益（四级缓存热点读）
      *
      * @param modelId 模型 id，默认 0=通用额度池
      */

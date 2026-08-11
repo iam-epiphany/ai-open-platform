@@ -24,7 +24,7 @@ import static com.aiopenplatform.utils.RedisConstants.TOKEN_ACTIVITY_TTL;
  * <p>
  * 平台活动页服务实现
  * </p>
- * 活动页聚合数据（活动信息 + SKU 列表）是热点读数据，走五级缓存；
+ * 活动页聚合数据（活动信息 + SKU 列表）是热点读数据，走四级缓存；
  * SKU 变更由 binlog（Canal）驱动删除聚合 key，下次读取重建。
  */
 @Service

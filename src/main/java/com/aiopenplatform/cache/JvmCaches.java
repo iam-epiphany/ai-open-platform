@@ -13,7 +13,7 @@ import java.util.concurrent.TimeUnit;
  * 多级缓存 L1：JVM 本地缓存（Caffeine）
  * <p>
  * 按缓存域拆分为多个 Cache 实例（SKU 详情 / 活动页聚合 / 用户权益），
- * 值统一为 JSON 字符串，与 Memcache（L2）、Redis（L3）保持一致。
+ * 值统一为 JSON 字符串，与 Redis（L2）保持一致。
  * 失效方式：本地直接 invalidate；跨节点通过 Redis Pub/Sub 广播 {@code cache:invalidate} 频道通知。
  * </p>
  */

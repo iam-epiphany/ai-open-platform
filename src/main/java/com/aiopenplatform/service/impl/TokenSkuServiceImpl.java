@@ -23,7 +23,7 @@ import static com.aiopenplatform.utils.RedisConstants.TOKEN_STOCK_KEY;
  * <p>
  * Token 包 SKU 服务实现
  * </p>
- * 读：SKU 详情走五级缓存（ScopeCaching -&gt; Caffeine -&gt; Memcache -&gt; Redis -&gt; MySQL）。
+ * 读：SKU 详情走四级缓存（ScopeCaching -&gt; Caffeine -&gt; Redis -&gt; MySQL）。
  * 写：业务代码只写 MySQL，缓存同步交给 binlog（Canal）；canal 关闭时兜底手动删缓存。
  */
 @Slf4j

@@ -40,7 +40,7 @@ public class TokenSkuController {
     }
 
     /**
-     * SKU 详情（五级缓存热点读：ScopeCaching -&gt; Caffeine -&gt; Memcache -&gt; Redis -&gt; MySQL）
+     * SKU 详情（四级缓存热点读：ScopeCaching -&gt; Caffeine -&gt; Redis -&gt; MySQL）
      */
     @GetMapping("/{id}")
     public Result getSku(@PathVariable("id") Long id) {

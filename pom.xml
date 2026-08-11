@@ -80,6 +80,14 @@
             <artifactId>mybatis-plus-boot-starter</artifactId>
             <version>3.4.3</version>
         </dependency>
+        <!--JDK 17+ 兼容：MyBatis-Plus 3.4.3 默认传递 mybatis 3.5.7（自带 ognl 3.1.x，
+        在 JDK 17+ 静态初始化抛 ExceptionInInitializerError，JDK 25 必现），
+        显式覆盖为 mybatis 3.5.19（ognl 3.3.4，兼容 JDK 25）-->
+        <dependency>
+            <groupId>org.mybatis</groupId>
+            <artifactId>mybatis</artifactId>
+            <version>3.5.19</version>
+        </dependency>
         <!--hutool-->
         <dependency>
             <groupId>cn.hutool</groupId>
@@ -101,12 +109,6 @@
             <groupId>com.github.ben-manes.caffeine</groupId>
             <artifactId>caffeine</artifactId>
             <version>2.9.3</version>
-        </dependency>
-        <!--memcached 多级缓存 L2（xmemcached 客户端）-->
-        <dependency>
-            <groupId>com.googlecode.xmemcached</groupId>
-            <artifactId>xmemcached</artifactId>
-            <version>2.4.8</version>
         </dependency>
         <!--canal 客户端：binlog 驱动缓存同步（官方 1.1.7 未发布到 Maven 中央仓库/阿里云镜像，
         从 GitHub Release canal.example-1.1.7.tar.gz 提取到 libs/canal/，

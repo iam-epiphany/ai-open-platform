@@ -19,7 +19,7 @@ import static com.aiopenplatform.utils.RedisConstants.TOKEN_QUOTA_TTL;
  * <p>
  * 用户 Token 权益服务实现
  * </p>
- * 权益查询走五级缓存；发放时原子 upsert（唯一索引 (user_id, model_id)），
+ * 权益查询走四级缓存；发放时原子 upsert（唯一索引 (user_id, model_id)），
  * 缓存失效由 binlog（Canal）驱动，canal 关闭时兜底手动删缓存。
  */
 @Slf4j

@@ -1,4 +1,4 @@
-# 完整演示环境一键启动：MySQL(5.7, 开 binlog) + Redis + Memcached + Canal Server
+# 完整演示环境一键启动：MySQL(5.7, 开 binlog) + Redis + Canal Server
 # 用法：docker compose up -d   （启动应用用 demo profile：mvn spring-boot:run -Dspring-boot.run.profiles=demo）
 # 说明：Canal 1.1.7 客户端不兼容 MySQL 9.x（mysql_native_password 被移除），
 #       故演示环境内置 MySQL 5.7（3307），不占用本机 3306
@@ -32,13 +32,6 @@ services:
     ports:
       - "6370:6379"
     command: redis-server --requirepass 123456 --appendonly yes
-
-  memcached:
-    image: memcached:1.6-alpine
-    container_name: token-memcached
-    ports:
-      - "11211:11211"
-    command: memcached -m 64 -c 1024
 
   canal-server:
     image: canal/canal-server:v1.1.7

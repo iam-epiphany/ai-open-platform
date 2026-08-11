@@ -11,7 +11,7 @@ import com.aiopenplatform.entity.TokenSku;
 public interface ITokenSkuService extends IService<TokenSku> {
 
     /**
-     * SKU 详情查询（多级缓存：ScopeCaching -&gt; Caffeine -&gt; Memcache -&gt; Redis -&gt; MySQL）
+     * SKU 详情查询（多级缓存：ScopeCaching -&gt; Caffeine -&gt; Redis -&gt; MySQL）
      */
     TokenSku getSkuWithCache(Long id);
 

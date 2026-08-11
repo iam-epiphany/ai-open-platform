@@ -31,7 +31,7 @@ import static com.aiopenplatform.utils.RedisConstants.TOKEN_SKU_TTL;
  * <p>
  * MySQL 为事实源：业务代码只写 DB，本监听器订阅 canal-server 推送的 ROW binlog：
  * <ul>
- *     <li>tb_token_sku 详情变更 → 写透传 Memcache（L2）/Redis（L3）+ 广播 JVM 缓存失效（L1）；</li>
+ *     <li>tb_token_sku 详情变更 → 写透传 Redis（L2）+ 广播 JVM 缓存失效（L1）；</li>
  *     <li>活动页聚合数据变更 / SKU 变更影响活动聚合 → 删除聚合 key，下一次读请求重建；</li>
  *     <li>tb_user_quota 变更 → 删除权益缓存 key；</li>
  * </ul>

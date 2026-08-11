@@ -1,13 +1,13 @@
 # AI-OpenPlatform · AI 开放平台
 
 > 大模型平台的拉新/运营活动场景：给用户限量发放 **10 万 Tokens 免费体验包、指定模型试用额度包、企业团队共享 Token 池**。
-> 读链路五级缓存 + Canal binlog 驱动一致性；写链路 Redis Lua 原子预扣 + Stream 异步发放，三层防超卖、三重防重复、补偿闭环不丢不重。
+> 读链路四级缓存 + Canal binlog 驱动一致性；写链路 Redis Lua 原子预扣 + Stream 异步发放，三层防超卖、三重防重复、补偿闭环不丢不重。
 
 ## 要解决的四个问题
 
 | 问题 | 方案 |
 | --- | --- |
-| 活动开始瞬间流量高，不能打穿 MySQL | 读链路五级缓存 + 写链路 Redis Lua 预扣 + Stream 异步削峰 |
+| 活动开始瞬间流量高，不能打穿 MySQL | 读链路四级缓存 + 写链路 Redis Lua 预扣 + Stream 异步削峰 |
 | Token 包库存有限，不能超卖 | Redis Lua 原子预扣（流量拦截）+ MySQL 乐观锁 `stock > 0`（事实源）双保险 |
 | 同一个用户不能重复领取 | Lua 内 `sismember` 一人一份 / `incr` 限购 N 份 + DB 幂等校验 + Redisson 用户级锁 |
 | 抢购成功后要创建订单、刷新用户权益 | Redis Stream 异步发放：订单 + token 账本 + 用户权益同事务落库 |
@@ -17,12 +17,12 @@
 ```
 ┌───────────────────────────── 读链路（热点数据：活动页 / SKU 详情 / 用户权益） ─────────────────────────────┐
 │                                                                                                           │
-│  请求 → L0 ScopeCaching(请求内) → L1 JVM Caffeine → L2 Memcache → L3 Redis → L4 MySQL                     │
+│  请求 → L0 ScopeCaching(请求内) → L1 JVM Caffeine → L2 Redis → L3 MySQL                                   │
 │         └────────── 逐级回源，回源后逐级写回；Redis 层 SETNX 互斥锁防击穿、空值短 TTL 防穿透 ────────────────│
 │                                                                                                           │
 │  缓存一致性（MySQL 为事实源，binlog 驱动）                                                                │
 │  业务代码只写 MySQL → MySQL binlog → Canal-server → BinlogCacheSyncListener：                              │
-│    · tb_token_sku 详情变更   → 写透传 Memcache/Redis + 广播 JVM 缓存失效（Redis Pub/Sub）                   │
+│    · tb_token_sku 详情变更   → 写透传 Redis + 广播 JVM 缓存失效（Redis Pub/Sub）                            │
 │    · 活动页聚合数据变更       → 删除聚合 key，下一次读请求重建                                             │
 │    · tb_user_quota 变更      → 删除权益缓存 key                                                            │
 └───────────────────────────────────────────────────────────────────────────────────────────────────────────┘
@@ -50,12 +50,12 @@
 | --- | --- | --- |
 | Token 包 SKU | `POST /token-sku` | 管理端新增 Token 包（预热 Redis 库存） |
 | | `PUT /token-sku` | 管理端更新 SKU（只写 DB，缓存同步交给 binlog） |
-| | `GET /token-sku/{id}` | SKU 详情（五级缓存热点读） |
+| | `GET /token-sku/{id}` | SKU 详情（四级缓存热点读） |
 | 活动页 | `GET /token-activity/list` | 在售活动列表（活动 + 各自 SKU 聚合），供前端列表页 |
-| | `GET /token-activity/{id}` | 活动页聚合数据：活动信息 + SKU 列表（五级缓存热点读） |
+| | `GET /token-activity/{id}` | 活动页聚合数据：活动信息 + SKU 列表（四级缓存热点读） |
 | 抢购 | `POST /token-order/grant/{skuId}` | Lua 原子预扣 + Stream 异步发放，直接返回订单 id |
 | 订单 | `GET /token-order/user` | 我的发放订单 |
-| 权益 | `GET /user-quota/me?modelId=0` | 我的 Token 权益（五级缓存热点读） |
+| 权益 | `GET /user-quota/me?modelId=0` | 我的 Token 权益（四级缓存热点读） |
 | AI 调用 | `GET /ai/models` | 模型目录（在售 SKU 按 modelId 去重，公开放行） |
 | | `POST /ai/chat` | 模型调用（模拟计费）：幂等 → 余额预检 → 乐观锁扣减 → 账本(2) + 调用日志同事务 |
 | 应用/密钥 | `POST /apps`、`GET /apps`、`POST /apps/{id}/keys`、`PUT /apps/keys/{keyId}`、`DELETE /apps/{id}` | 应用与 API Key 管理（明文仅创建时返回一次，库中存 SHA-256 哈希） |
@@ -65,7 +65,7 @@
 ## 部署步骤（Demo 环境，一键起全套中间件）
 
 ```bash
-# 1. 启动 MySQL(5.7, 开 binlog, 自动导入建表+种子数据) + Redis + Memcached + Canal-server
+# 1. 启动 MySQL(5.7, 开 binlog, 自动导入建表+种子数据) + Redis + Canal-server
 docker compose up -d
 
 # 2. 启动应用（demo profile 连接 3307 的 MySQL）
@@ -109,9 +109,9 @@ nginx-1.18.0/nginx.exe
 
 ## 核心机制说明
 
-### 读链路（五级缓存）
+### 读链路（四级缓存）
 
-`MultiLevelCacheService.get()` 逐级查询：ScopeCaching（请求内）→ Caffeine（JVM）→ Memcache → Redis → MySQL 回源；
+`MultiLevelCacheService.get()` 逐级查询：ScopeCaching（请求内）→ Caffeine（JVM）→ Redis → MySQL 回源；
 命中低层后逐级写回，DEBUG 日志打印各级命中（`【缓存命中 L1 Caffeine】` 等）。
 
 - **防击穿**：Redis 层 SETNX 互斥锁，回源期间其他请求休眠重试
@@ -140,7 +140,7 @@ XADD 与预扣同一原子操作，杜绝「预扣成功但消息丢失」；XAD
 
 `BinlogCacheSyncListener` 用官方 canal-client（手动客户端模式）连接 canal-server（11111），订阅 `token_platform\.(tb_token_.*|tb_user_quota)`：
 
-- `tb_token_sku` 变更 → 写透传 Memcache/Redis + Redis Pub/Sub 广播 JVM 缓存失效（跨节点），并删除包含该 SKU 的活动聚合 key
+- `tb_token_sku` 变更 → 写透传 Redis + Redis Pub/Sub 广播 JVM 缓存失效（跨节点），并删除包含该 SKU 的活动聚合 key
 - `tb_token_activity` / `tb_user_quota` 变更 → 删除缓存 key，下一次读请求重建
 
 > ⚠️ 配置注意：`application.yaml` 的 `canal.filter` 是 YAML plain scalar（不做转义），**写单反斜杠** `token_platform\.(tb_token_.*|tb_user_quota)`；
@@ -180,4 +180,4 @@ curl -X PUT http://localhost:8081/token-sku -H "Content-Type: application/json" 
 - 企业共享池（限购 10 份）并发 10 次：恰好 10 单（限购计数原子）
 - 重复领取拦截：已领取用户再抢全部拒绝，订单不重复
 - 防刷频控：同 IP 同接口超限后返回「请求过于频繁，请稍后再试」
-- SKU 变更（PUT）→ binlog → Canal → 写透传 Memcache/Redis + 广播 JVM 失效 + 活动聚合重建，接口即时读到新值
+- SKU 变更（PUT）→ binlog → Canal → 写透传 Redis + 广播 JVM 失效 + 活动聚合重建，接口即时读到新值

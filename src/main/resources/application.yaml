@@ -28,12 +28,6 @@ logging:
   pattern:
     dateformat: mm:ss.SSS
 
-# ============ Memcached：多级缓存 L2 ============
-memcached:
-  servers: 127.0.0.1:11211
-  pool-size: 5
-  op-timeout: 2000 # 单次操作超时 ms
-
 # ============ Canal：binlog 驱动缓存同步 ============
 canal:
   # 总开关：false 时停用 binlog 同步，写路径降级为 Cache Aside（手动删缓存）
