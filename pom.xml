@@ -8,11 +8,11 @@
         <version>2.3.12.RELEASE</version>
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
-    <groupId>com.hmdp</groupId>
-    <artifactId>token-seckill</artifactId>
+    <groupId>com.aiopenplatform</groupId>
+    <artifactId>ai-open-platform</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <name>token-seckill</name>
-    <description>大模型平台 Token 包秒杀系统（黑马点评改造）</description>
+    <name>ai-open-platform</name>
+    <description>AI 开放平台：Token 包高并发抢购 + 模型调用计费系统</description>
     <properties>
         <java.version>1.8</java.version>
     </properties>

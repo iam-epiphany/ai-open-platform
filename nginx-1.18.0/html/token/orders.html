@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>我的订单 - AI 开放平台</title>
+  <link rel="stylesheet" href="css/element.css">
+  <link rel="stylesheet" href="css/token.css">
+  <link rel="icon" href="favicon.ico">
+</head>
+<body>
+<div id="app" v-cloak>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="logo" href="index.html">⚡ AI 开放平台</a>
+      <div class="topbar-right">
+        <template v-if="logged">
+          <a class="link" href="index.html">控制台</a>
+          <a class="link" href="playground.html">模型调用</a>
+          <a class="link" href="apps.html">API 管理</a>
+          <a class="link" href="billing.html">账单</a>
+          <a class="link" v-if="isAdmin" href="admin.html">管理后台</a>
+          <span class="nick">{{ me.nickName }}</span>
+          <el-button size="small" @click="logout">退出</el-button>
+        </template>
+        <template v-else>
+          <el-button size="small" type="primary" @click="goLogin">登录 / 注册</el-button>
+        </template>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <div class="panel">
+      <div class="panel-title" style="display:flex; justify-content:space-between; align-items:center;">
+        <span>📦 我的 Token 发放记录</span>
+        <el-button size="mini" icon="el-icon-refresh" @click="load">刷新</el-button>
+      </div>
+
+      <el-table v-loading="loading" :data="orders" style="width:100%">
+        <el-table-column prop="id" label="订单号" width="200"></el-table-column>
+        <el-table-column label="Token 包">
+          <template slot-scope="scope">
+            {{ skuName(scope.row.skuId) }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="tokenAmount" label="Token 量">
+          <template slot-scope="scope">{{ formatTokens(scope.row.tokenAmount) }}</template>
+        </el-table-column>
+        <el-table-column label="渠道">
+          <template slot-scope="scope">
+            <el-tag size="mini" :type="scope.row.channel === 1 ? 'success' : 'warning'">
+              {{ scope.row.channel === 1 ? '拉新活动' : '企业共享池' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态">
+          <template slot-scope="scope">
+            <el-tag size="mini" type="success">{{ scope.row.status === 1 ? '已发放' : '发放中' }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="发放时间">
+          <template slot-scope="scope">{{ formatTime(scope.row.grantTime) }}</template>
+        </el-table-column>
+      </el-table>
+
+      <el-empty v-if="!loading && orders.length === 0" description="暂无发放记录，快去活动页抢购吧"></el-empty>
+    </div>
+  </main>
+</div>
+
+<script src="js/vue.js"></script>
+<script src="js/element.js"></script>
+<script src="js/axios.min.js"></script>
+<script src="js/common.js"></script>
+<script src="js/api.js"></script>
+<script>
+  Vue.use(ELEMENT);
+  new Vue({
+    el: '#app',
+    mixins: [topbarMixin],
+    data: function () {
+      return {
+        loading: false,
+        orders: [],
+        skuMap: {}
+      };
+    },
+    created: function () {
+      this.load();
+    },
+    methods: {
+      load: function () {
+        var self = this;
+        this.loading = true;
+        api.myOrders().then(function (res) {
+          self.orders = res.data || [];
+          self.warmSkuMap();
+        }).catch(showError).then(function () {
+          self.loading = false;
+        });
+      },
+      // 预热 SKU 名称映射（订单接口只回 skuId，名称从活动聚合数据取）
+      warmSkuMap: function () {
+        var self = this;
+        api.listActivities().then(function (res) {
+          var map = {};
+          (res.data || []).forEach(function (item) {
+            (item.skus || []).forEach(function (sku) {
+              map[sku.id] = sku.packageName;
+            });
+          });
+          self.skuMap = map;
+        }).catch(function () {});
+      },
+      skuName: function (skuId) {
+        return this.skuMap[skuId] || ('Token 包 #' + skuId);
+      }
+    }
+  });
+</script>
+</body>
+</html>

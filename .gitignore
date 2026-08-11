@@ -34,3 +34,11 @@ build/
 
 ### ZCode ###
 .zcode/
+
+### 面试材料（不入库） ###
+docs/
+
+### nginx：只提交前端与自定义配置，忽略二进制与运行产物 ###
+nginx-1.18.0/*
+!nginx-1.18.0/html/
+!nginx-1.18.0/conf/nginx.conf

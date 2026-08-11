@@ -2,10 +2,10 @@ server:
   port: 8081
 spring:
   application:
-    name: token-seckill
+    name: ai-open-platform
   datasource:
     driver-class-name: com.mysql.jdbc.Driver
-    url: jdbc:mysql://127.0.0.1:3306/dawang-dianping?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true&useSSL=false
+    url: jdbc:mysql://127.0.0.1:3306/token_platform?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true&useSSL=false
     username: root
     password: 20030226
   redis:
@@ -21,10 +21,10 @@ spring:
   jackson:
     default-property-inclusion: non_null # JSON处理时忽略非空字段
 mybatis-plus:
-  type-aliases-package: com.hmdp.entity # 别名扫描包
+  type-aliases-package: com.aiopenplatform.entity # 别名扫描包
 logging:
   level:
-    com.hmdp: debug
+    com.aiopenplatform: debug
   pattern:
     dateformat: mm:ss.SSS
 
@@ -44,4 +44,15 @@ canal:
   destination: example
   batch-size: 100
   # 注意：YAML plain scalar 不做转义，此处为单反斜杠（Java 正则中 \. 匹配字面点）
-  filter: dawang-dianping\.tb_token_.*
+  # tb_user_quota 不在 tb_token_* 前缀内，需单独纳入订阅（权益扣减后缓存失效依赖它）
+  filter: token_platform\.(tb_token_.*|tb_user_quota)
+
+# ============ 应用配置 ============
+app:
+  # 图片上传根目录（相对项目根目录，与 nginx 前端静态目录一致）
+  upload-dir: nginx-1.18.0/html/token/imgs/
+
+# ============ 管理后台 ============
+# 管理员手机号白名单（逗号分隔）：登录后 /admin/** 接口按此校验
+admin:
+  phones: 13686869696

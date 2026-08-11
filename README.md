@@ -1,7 +1,7 @@
-# Token-SecKill · 大模型平台 Token 包秒杀系统
+# AI-OpenPlatform · AI 开放平台
 
-> 由「黑马点评」项目改造而来：把商铺优惠券秒杀场景整体魔改为**大模型平台 Token 包发放/秒杀**场景。
-> 平台做拉新活动时给新用户限量发放：**10 万 Tokens 免费体验包、指定模型试用额度包、企业团队共享 Token 池**。
+> 大模型平台的拉新/运营活动场景：给用户限量发放 **10 万 Tokens 免费体验包、指定模型试用额度包、企业团队共享 Token 池**。
+> 读链路五级缓存 + Canal binlog 驱动一致性；写链路 Redis Lua 原子预扣 + Stream 异步发放，三层防超卖、三重防重复、补偿闭环不丢不重。
 
 ## 要解决的四个问题
 
@@ -51,10 +51,16 @@
 | Token 包 SKU | `POST /token-sku` | 管理端新增 Token 包（预热 Redis 库存） |
 | | `PUT /token-sku` | 管理端更新 SKU（只写 DB，缓存同步交给 binlog） |
 | | `GET /token-sku/{id}` | SKU 详情（五级缓存热点读） |
-| 活动页 | `GET /token-activity/{id}` | 活动页聚合数据：活动信息 + SKU 列表（五级缓存热点读） |
+| 活动页 | `GET /token-activity/list` | 在售活动列表（活动 + 各自 SKU 聚合），供前端列表页 |
+| | `GET /token-activity/{id}` | 活动页聚合数据：活动信息 + SKU 列表（五级缓存热点读） |
 | 抢购 | `POST /token-order/grant/{skuId}` | Lua 原子预扣 + Stream 异步发放，直接返回订单 id |
 | 订单 | `GET /token-order/user` | 我的发放订单 |
 | 权益 | `GET /user-quota/me?modelId=0` | 我的 Token 权益（五级缓存热点读） |
+| AI 调用 | `GET /ai/models` | 模型目录（在售 SKU 按 modelId 去重，公开放行） |
+| | `POST /ai/chat` | 模型调用（模拟计费）：幂等 → 余额预检 → 乐观锁扣减 → 账本(2) + 调用日志同事务 |
+| 应用/密钥 | `POST /apps`、`GET /apps`、`POST /apps/{id}/keys`、`PUT /apps/keys/{keyId}`、`DELETE /apps/{id}` | 应用与 API Key 管理（明文仅创建时返回一次，库中存 SHA-256 哈希） |
+| 账单 | `GET /billing/summary`、`/billing/records`、`/billing/daily` | 余额池/流水/每日消耗统计 |
+| 管理后台 | `GET /admin/overview`、`/admin/call-logs`、`/admin/skus`、`PUT /admin/quota` | 数据总览/调用日志/SKU 管理/额度调整（admin.phones 白名单鉴权，调额写账本=审计） |
 
 ## 部署步骤（Demo 环境，一键起全套中间件）
 
@@ -68,6 +74,26 @@ mvn spring-boot:run -Dspring-boot.run.profiles=demo
 
 启动日志应依次出现：库存预热（`token:stock:1` 等）→ Stream 消费组创建 → `Canal binlog 监听已连接`。
 
+### 前端（nginx 静态托管）
+
+页面在 `nginx-1.18.0/html/token/`，由 nginx（8080）托管，请求统一加 `/api` 前缀、由 nginx 剥离后转发到后端 8081：
+
+```bash
+# 3. 启动前端（nginx-1.18.0/conf/nginx.conf 已配置 root html/token 与 /api 转发）
+nginx-1.18.0/nginx.exe
+# 浏览器访问 http://localhost:8080
+```
+
+| 页面 | 说明 |
+| --- | --- |
+| `index.html` | 活动列表（在售活动 + Token 包聚合） |
+| `detail.html` | 活动详情：倒计时、库存、抢购（`POST /token-order/grant/{skuId}`） |
+| `orders.html` | 我的发放订单 |
+| `me.html` | 个人中心：Token 余额（`GET /user-quota/me`） |
+| `login.html` | 手机验证码登录 |
+
+前端为纯静态 Vue2 + Element UI（库文件本地化，离线可用），无构建步骤。
+
 ### 运行环境要求
 
 - **JDK 8 或 17+ 均可**。JDK 17+ 运行 MyBatis-Plus 3.4.3 需要放开模块访问（IDE 的 VM options 或命令行加）：
@@ -78,7 +104,7 @@ mvn spring-boot:run -Dspring-boot.run.profiles=demo
 
 - **为什么用 Docker MySQL 5.7（3307）**：Canal 1.1.7 客户端不兼容 MySQL 9.x（`mysql_native_password` 认证插件被 9.0 移除）。
   若你本机 MySQL 是 5.7/8.0 且已开 binlog（`log-bin` + `binlog_format=ROW` + `binlog_row_image=FULL`），
-  可把 `application-demo.yaml` 的 datasource 改回 3306 并使用本机库（先导入 `db/hmdp.sql` + `db/token_platform.sql`，建 canal 账号）。
+  可把 `application-demo.yaml` 的 datasource 改回 3306 并使用本机库（先导入 `db/token_base.sql` + `db/token_platform.sql`，建 canal 账号）。
 - **本机 MySQL 无法开 binlog 时**：`application.yaml` 中 `canal.enabled: false`，缓存同步自动降级为 Cache Aside（手动删缓存），读/写链路其余功能不受影响。
 
 ## 核心机制说明
@@ -112,12 +138,12 @@ XADD 与预扣同一原子操作，杜绝「预扣成功但消息丢失」；XAD
 
 ### binlog 驱动缓存同步（Canal）
 
-`BinlogCacheSyncListener` 用官方 canal-client（手动客户端模式）连接 canal-server（11111），订阅 `dawang-dianping\.tb_token_.*`：
+`BinlogCacheSyncListener` 用官方 canal-client（手动客户端模式）连接 canal-server（11111），订阅 `token_platform\.(tb_token_.*|tb_user_quota)`：
 
 - `tb_token_sku` 变更 → 写透传 Memcache/Redis + Redis Pub/Sub 广播 JVM 缓存失效（跨节点），并删除包含该 SKU 的活动聚合 key
 - `tb_token_activity` / `tb_user_quota` 变更 → 删除缓存 key，下一次读请求重建
 
-> ⚠️ 配置注意：`application.yaml` 的 `canal.filter` 是 YAML plain scalar（不做转义），**写单反斜杠** `dawang-dianping\.tb_token_.*`；
+> ⚠️ 配置注意：`application.yaml` 的 `canal.filter` 是 YAML plain scalar（不做转义），**写单反斜杠** `token_platform\.(tb_token_.*|tb_user_quota)`；
 > 若写成 `\\.` 会把正则变成「匹配字面反斜杠」，导致订阅永远过滤不到事件。
 
 ### 依赖说明（重要）

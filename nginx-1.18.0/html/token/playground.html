@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>模型调用 - AI 开放平台</title>
+  <link rel="stylesheet" href="css/element.css">
+  <link rel="stylesheet" href="css/token.css">
+  <link rel="icon" href="favicon.ico">
+</head>
+<body>
+<div id="app" v-cloak>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="logo" href="index.html">⚡ AI 开放平台</a>
+      <div class="topbar-right">
+        <template v-if="logged">
+          <a class="link" href="index.html">控制台</a>
+          <a class="link" href="apps.html">API 管理</a>
+          <a class="link" href="billing.html">账单</a>
+          <a class="link" href="orders.html">订单</a>
+          <a class="link" href="me.html">个人中心</a>
+          <a class="link" v-if="isAdmin" href="admin.html">管理后台</a>
+          <span class="nick">{{ me.nickName }}</span>
+          <el-button size="small" @click="logout">退出</el-button>
+        </template>
+        <template v-else>
+          <el-button size="small" type="primary" @click="goLogin">登录 / 注册</el-button>
+        </template>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <h2 class="page-title">🤖 模型调用 Playground（模拟计费）</h2>
+
+    <div class="chat-box">
+      <el-form label-width="80px">
+        <el-form-item label="模型">
+          <el-select v-model="modelId" placeholder="请选择模型" style="width:280px;">
+            <el-option v-for="m in models" :key="m.modelId" :label="m.modelName" :value="m.modelId"></el-option>
+          </el-select>
+        </el-form-item>
+        <el-form-item label="提示词">
+          <el-input
+              v-model="prompt"
+              type="textarea"
+              :rows="5"
+              placeholder="输入你的问题，例如：帮我写一段 Python 冒泡排序代码，并解释时间复杂度"
+              maxlength="2000"></el-input>
+        </el-form-item>
+        <el-form-item label="输出上限">
+          <el-input-number v-model="maxTokens" :min="16" :max="2048" :step="16" style="width:160px;"></el-input-number>
+          <span style="margin-left:10px;font-size:12px;color:#909399;">Tokens（估算输出长度，默认 256）</span>
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" :loading="calling" @click="chat">调用模型</el-button>
+          <el-button @click="clear">清空</el-button>
+        </el-form-item>
+      </el-form>
+    </div>
+
+    <!-- 本次调用结果 -->
+    <div class="chat-box" v-if="result">
+      <div class="panel-title">📨 回复内容</div>
+      <div class="chat-reply">{{ result.reply }}</div>
+      <div class="usage-line">
+        <span>模型：<b>{{ result.modelName }}</b></span>
+        <span>输入：<b>{{ result.promptTokens }}</b> Tokens</span>
+        <span>输出：<b>{{ result.completionTokens }}</b> Tokens</span>
+        <span>本次消耗：<b>{{ result.totalTokens }}</b> Tokens</span>
+        <span>扣费后余额：<b>{{ formatTokens(result.balanceAfter) }}</b></span>
+      </div>
+    </div>
+
+    <!-- 会话内历史 -->
+    <div class="chat-box" v-if="history.length > 0">
+      <div class="panel-title">🕘 本次会话调用记录（{{ history.length }} 次）</div>
+      <div class="chat-reply" v-for="(h, i) in history" :key="i" style="margin-top:8px;font-size:13px;">
+        <div style="color:#909399;">[{{ h.time }}] {{ h.modelName }} · 消耗 {{ h.totalTokens }} Tokens · 余额 {{ formatTokens(h.balanceAfter) }}</div>
+        <div style="margin-top:6px;">{{ h.reply }}</div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="js/vue.js"></script>
+<script src="js/element.js"></script>
+<script src="js/axios.min.js"></script>
+<script src="js/common.js"></script>
+<script src="js/api.js"></script>
+<script>
+  Vue.use(ELEMENT);
+  new Vue({
+    el: '#app',
+    mixins: [topbarMixin],
+    data: function () {
+      return {
+        models: [],
+        modelId: null,
+        prompt: '',
+        maxTokens: 256,
+        calling: false,
+        result: null,
+        history: []
+      };
+    },
+    created: function () {
+      var self = this;
+      var preset = new URLSearchParams(location.search).get('modelId');
+      api.listModels().then(function (res) {
+        self.models = res.data || [];
+        if (preset && self.models.length) {
+          var hit = self.models.filter(function (m) { return String(m.modelId) === preset; });
+          if (hit.length) self.modelId = hit[0].modelId;
+        }
+      }).catch(showError);
+    },
+    methods: {
+      chat: function () {
+        var self = this;
+        if (!this.modelId) {
+          ELEMENT.Message.warning('请先选择模型');
+          return;
+        }
+        if (!this.prompt || !this.prompt.trim()) {
+          ELEMENT.Message.warning('请输入提示词');
+          return;
+        }
+        this.calling = true;
+        api.chat({
+          modelId: this.modelId,
+          prompt: this.prompt,
+          maxTokens: this.maxTokens,
+          requestId: 'web-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)
+        }).then(function (res) {
+          self.result = res.data;
+          self.history.unshift({
+            time: formatTime(new Date()),
+            modelName: res.data.modelName,
+            totalTokens: res.data.totalTokens,
+            balanceAfter: res.data.balanceAfter,
+            reply: res.data.reply
+          });
+        }).catch(showError).then(function () {
+          self.calling = false;
+        });
+      },
+      clear: function () {
+        this.prompt = '';
+        this.result = null;
+        this.history = [];
+      }
+    }
+  });
+</script>
+</body>
+</html>

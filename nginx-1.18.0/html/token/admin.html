@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>管理后台 - AI 开放平台</title>
+  <link rel="stylesheet" href="css/element.css">
+  <link rel="stylesheet" href="css/token.css">
+  <link rel="icon" href="favicon.ico">
+</head>
+<body>
+<div id="app" v-cloak>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="logo" href="index.html">⚡ AI 开放平台</a>
+      <div class="topbar-right">
+        <template v-if="logged">
+          <a class="link" href="index.html">控制台</a>
+          <a class="link" href="playground.html">模型调用</a>
+          <a class="link" href="apps.html">API 管理</a>
+          <a class="link" href="billing.html">账单</a>
+          <a class="link" href="me.html">个人中心</a>
+          <span class="nick">{{ me.nickName }}</span>
+          <el-button size="small" @click="logout">退出</el-button>
+        </template>
+        <template v-else>
+          <el-button size="small" type="primary" @click="goLogin">登录 / 注册</el-button>
+        </template>
+      </div>
+    </div>
+  </header>
+
+  <main class="container" v-loading="loading">
+    <h2 class="page-title">🛠 管理后台</h2>
+
+    <!-- 平台总览 -->
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="label">用户数</div>
+        <div class="value">{{ overview.userCount }}<span class="unit">人</span></div>
+      </div>
+      <div class="stat-card">
+        <div class="label">发放订单</div>
+        <div class="value">{{ overview.orderCount }}<span class="unit">单</span></div>
+      </div>
+      <div class="stat-card">
+        <div class="label">开放应用</div>
+        <div class="value">{{ overview.appCount }}<span class="unit">个</span></div>
+      </div>
+      <div class="stat-card">
+        <div class="label">累计发放</div>
+        <div class="value">{{ formatTokens(overview.grantTotal) }}<span class="unit">Tokens</span></div>
+      </div>
+      <div class="stat-card">
+        <div class="label">累计消耗</div>
+        <div class="value">{{ formatTokens(overview.consumeTotal) }}<span class="unit">Tokens</span></div>
+      </div>
+      <div class="stat-card">
+        <div class="label">模型调用</div>
+        <div class="value">{{ overview.callCount }}<span class="unit">次</span></div>
+      </div>
+    </div>
+
+    <!-- SKU 管理 -->
+    <div class="panel" style="margin-bottom:20px;">
+      <div class="panel-title" style="display:flex;justify-content:space-between;align-items:center;">
+        <span>🎁 Token 包（SKU）管理</span>
+        <el-button size="mini" type="primary" @click="openSkuForm()">新增 Token 包</el-button>
+      </div>
+      <el-table :data="skus" size="mini" style="width:100%">
+        <el-table-column prop="id" label="ID" width="60"></el-table-column>
+        <el-table-column prop="modelName" label="模型" width="120"></el-table-column>
+        <el-table-column prop="packageName" label="Token 包名称" min-width="200"></el-table-column>
+        <el-table-column label="Token 量" width="110">
+          <template slot-scope="scope">{{ formatTokens(scope.row.tokenAmount) }}</template>
+        </el-table-column>
+        <el-table-column label="类型" width="100">
+          <template slot-scope="scope">
+            <el-tag size="mini" :type="scope.row.type === 1 ? 'success' : 'warning'">
+              {{ scope.row.type === 1 ? '限时体验' : '企业共享' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="stock" label="库存" width="80"></el-table-column>
+        <el-table-column prop="limitCount" label="限购" width="70"></el-table-column>
+        <el-table-column label="状态" width="90">
+          <template slot-scope="scope">
+            <el-tag size="mini" :type="scope.row.status === 1 ? 'success' : 'info'">
+              {{ scope.row.status === 1 ? '上架' : '下架' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="170">
+          <template slot-scope="scope">
+            <el-button size="mini" type="text" @click="openSkuForm(scope.row)">编辑</el-button>
+            <el-button size="mini" type="text" @click="toggleSku(scope.row)">
+              {{ scope.row.status === 1 ? '下架' : '上架' }}
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </div>
+
+    <!-- 调用日志 -->
+    <div class="panel" style="margin-bottom:20px;">
+      <div class="panel-title">📞 模型调用日志</div>
+      <el-table :data="callLogs" size="mini" style="width:100%">
+        <el-table-column prop="id" label="日志 ID" width="170" class-name="mono"></el-table-column>
+        <el-table-column prop="userId" label="用户" width="80"></el-table-column>
+        <el-table-column prop="modelName" label="模型" width="120"></el-table-column>
+        <el-table-column prop="promptTokens" label="输入" width="70"></el-table-column>
+        <el-table-column prop="completionTokens" label="输出" width="70"></el-table-column>
+        <el-table-column prop="totalTokens" label="总消耗" width="90"></el-table-column>
+        <el-table-column label="渠道" width="110">
+          <template slot-scope="scope">
+            <el-tag size="mini" :type="scope.row.channel === 1 ? 'primary' : 'warning'">
+              {{ scope.row.channel === 1 ? 'Playground' : 'API Key' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="时间">
+          <template slot-scope="scope">{{ formatTime(scope.row.createTime) }}</template>
+        </el-table-column>
+      </el-table>
+      <div style="text-align:center;margin-top:14px;">
+        <el-pagination
+            layout="prev, pager, next, total"
+            :total="callLogTotal"
+            :page-size="10"
+            :current-page.sync="logCurrent"
+            @current-change="loadCallLogs"></el-pagination>
+      </div>
+    </div>
+
+    <!-- 额度调整 -->
+    <div class="panel">
+      <div class="panel-title">💱 用户额度调整（写账本 = 操作审计）</div>
+      <el-form inline label-width="90px">
+        <el-form-item label="用户 ID">
+          <el-input v-model.number="quotaForm.userId" placeholder="用户 id" style="width:120px;"></el-input>
+        </el-form-item>
+        <el-form-item label="模型 ID">
+          <el-input v-model.number="quotaForm.modelId" placeholder="0=通用池" style="width:120px;"></el-input>
+        </el-form-item>
+        <el-form-item label="额度">
+          <el-input v-model.number="quotaForm.amount" placeholder="Token 数量" style="width:130px;"></el-input>
+        </el-form-item>
+        <el-form-item label="操作">
+          <el-radio-group v-model="quotaForm.type">
+            <el-radio :label="1">发放</el-radio>
+            <el-radio :label="2">回收</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" size="small" :loading="adjusting" @click="adjustQuota">执行</el-button>
+        </el-form-item>
+      </el-form>
+    </div>
+
+    <!-- SKU 编辑弹窗 -->
+    <el-dialog :title="skuForm.id ? '编辑 Token 包' : '新增 Token 包'" :visible.sync="skuDialog" width="520px">
+      <el-form label-width="110px" size="small">
+        <el-form-item label="模型名称">
+          <el-input v-model.trim="skuForm.modelName" placeholder="如 deepseek-r1"></el-input>
+        </el-form-item>
+        <el-form-item label="模型 ID">
+          <el-input v-model.number="skuForm.modelId" placeholder="0=通用池"></el-input>
+        </el-form-item>
+        <el-form-item label="包名称">
+          <el-input v-model.trim="skuForm.packageName" placeholder="如 10万 Tokens 免费体验包"></el-input>
+        </el-form-item>
+        <el-form-item label="Token 额度">
+          <el-input v-model.number="skuForm.tokenAmount" placeholder="如 100000"></el-input>
+        </el-form-item>
+        <el-form-item label="类型">
+          <el-radio-group v-model="skuForm.type">
+            <el-radio :label="1">限时体验（一人一份）</el-radio>
+            <el-radio :label="2">企业共享（限购 N 份）</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="库存">
+          <el-input v-model.number="skuForm.stock" placeholder="库存数量"></el-input>
+        </el-form-item>
+        <el-form-item label="每人限购">
+          <el-input v-model.number="skuForm.limitCount" placeholder="type=1 恒为 1"></el-input>
+        </el-form-item>
+        <el-form-item label="状态">
+          <el-radio-group v-model="skuForm.status">
+            <el-radio :label="1">上架</el-radio>
+            <el-radio :label="0">下架</el-radio>
+          </el-radio-group>
+        </el-form-item>
+      </el-form>
+      <span slot="footer">
+        <el-button size="small" @click="skuDialog = false">取消</el-button>
+        <el-button size="small" type="primary" :loading="savingSku" @click="saveSku">保存</el-button>
+      </span>
+    </el-dialog>
+  </main>
+</div>
+
+<script src="js/vue.js"></script>
+<script src="js/element.js"></script>
+<script src="js/axios.min.js"></script>
+<script src="js/common.js"></script>
+<script src="js/api.js"></script>
+<script>
+  Vue.use(ELEMENT);
+  new Vue({
+    el: '#app',
+    mixins: [topbarMixin],
+    data: function () {
+      return {
+        loading: false,
+        overview: {},
+        skus: [],
+        skuDialog: false,
+        savingSku: false,
+        skuForm: {},
+        callLogs: [],
+        callLogTotal: 0,
+        logCurrent: 1,
+        adjusting: false,
+        quotaForm: { userId: null, modelId: 0, amount: null, type: 1 }
+      };
+    },
+    created: function () {
+      this.load();
+    },
+    methods: {
+      load: function () {
+        var self = this;
+        this.loading = true;
+        Promise.all([api.adminOverview(), api.adminSkus(), api.adminCallLogs(1, 10)]).then(function (results) {
+          self.overview = results[0].data || {};
+          self.skus = results[1].data || [];
+          self.callLogs = (results[2].data) || [];
+          self.callLogTotal = results[2].total || 0;
+        }).catch(showError).then(function () {
+          self.loading = false;
+        });
+      },
+      loadCallLogs: function () {
+        var self = this;
+        api.adminCallLogs(this.logCurrent, 10).then(function (res) {
+          self.callLogs = res.data || [];
+          self.callLogTotal = res.total || 0;
+        }).catch(showError);
+      },
+      openSkuForm: function (sku) {
+        this.skuForm = sku ? JSON.parse(JSON.stringify(sku)) : {
+          modelName: '', modelId: 0, packageName: '', tokenAmount: null,
+          type: 1, stock: 0, limitCount: 1, status: 1
+        };
+        this.skuDialog = true;
+      },
+      saveSku: function () {
+        var self = this;
+        var body = JSON.parse(JSON.stringify(this.skuForm));
+        this.savingSku = true;
+        var req = body.id ? http.put('/api/token-sku', body) : http.post('/api/token-sku', body);
+        req.then(function () {
+          ELEMENT.Message.success('已保存');
+          self.skuDialog = false;
+          self.load();
+        }).catch(showError).then(function () {
+          self.savingSku = false;
+        });
+      },
+      toggleSku: function (sku) {
+        var self = this;
+        var body = JSON.parse(JSON.stringify(sku));
+        body.status = sku.status === 1 ? 0 : 1;
+        http.put('/api/token-sku', body).then(function () {
+          ELEMENT.Message.success(body.status === 1 ? '已上架' : '已下架');
+          self.load();
+        }).catch(showError);
+      },
+      adjustQuota: function () {
+        var self = this;
+        if (!this.quotaForm.userId || !this.quotaForm.amount || this.quotaForm.amount <= 0) {
+          ELEMENT.Message.warning('请填写用户 ID 与额度');
+          return;
+        }
+        this.adjusting = true;
+        api.adminAdjustQuota(this.quotaForm.userId, this.quotaForm.modelId, this.quotaForm.amount, this.quotaForm.type)
+          .then(function () {
+            ELEMENT.Message.success('已执行，账本已记录');
+            self.load();
+          }).catch(showError).then(function () {
+            self.adjusting = false;
+          });
+      }
+    }
+  });
+</script>
+</body>
+</html>

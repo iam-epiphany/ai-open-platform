@@ -1,8 +1,8 @@
-USE `dawang-dianping`;
+USE `token_platform`;
 /*
- Token 包秒杀平台业务表（在 dawang-dianping 库中执行）
- 前置：先导入 hmdp.sql（基础库，含 tb_user 等）
- 说明：本文件中的表由 Canal 订阅 binlog（dawang-dianping\.tb_token_.*），
+ AI 开放平台业务表（在 token_platform 库中执行）
+ 前置：先导入 token_base.sql（基础库，含 tb_user 等）
+ 说明：本文件中的表由 Canal 订阅 binlog（token_platform\.tb_token_.*），
        表结构变更后缓存同步策略见 README「binlog 驱动缓存同步」
 */
 
@@ -113,5 +113,51 @@ CREATE TABLE `tb_user_quota` (
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `uk_user_model`(`user_id`, `model_id`) USING BTREE
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_general_ci ROW_FORMAT = Compact;
+
+-- ============ AI 开放平台业务表（应用 / API Key / 模型调用日志） ============
+DROP TABLE IF EXISTS `tb_token_app`;
+CREATE TABLE `tb_token_app` (
+  `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `user_id` bigint(20) UNSIGNED NOT NULL COMMENT '所属用户 id',
+  `app_name` varchar(64) NOT NULL COMMENT '应用名称',
+  `description` varchar(255) NOT NULL DEFAULT '' COMMENT '应用描述',
+  `status` tinyint(4) NOT NULL DEFAULT 1 COMMENT '状态：1=启用；0=停用',
+  `create_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  INDEX `idx_user_id`(`user_id`) USING BTREE
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_general_ci ROW_FORMAT = Compact;
+
+DROP TABLE IF EXISTS `tb_token_api_key`;
+CREATE TABLE `tb_token_api_key` (
+  `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `app_id` bigint(20) UNSIGNED NOT NULL COMMENT '所属应用 id',
+  `user_id` bigint(20) UNSIGNED NOT NULL COMMENT '所属用户 id',
+  `api_key` char(64) NOT NULL COMMENT 'API Key 的 SHA-256 哈希（十六进制，不存明文）',
+  `key_prefix` varchar(16) NOT NULL COMMENT '明文前缀（tok_ 开头 12 位，仅用于展示识别）',
+  `status` tinyint(4) NOT NULL DEFAULT 1 COMMENT '状态：1=启用；0=禁用',
+  `last_used_time` datetime DEFAULT NULL COMMENT '最近使用时间',
+  `create_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_api_key`(`api_key`) USING BTREE,
+  INDEX `idx_app_id`(`app_id`) USING BTREE
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_general_ci ROW_FORMAT = Compact;
+
+DROP TABLE IF EXISTS `tb_token_call_log`;
+CREATE TABLE `tb_token_call_log` (
+  `id` bigint(20) NOT NULL COMMENT '主键（雪花 ID，RedisIdWorker 生成）',
+  `user_id` bigint(20) UNSIGNED NOT NULL COMMENT '调用用户 id',
+  `model_id` bigint(20) NOT NULL DEFAULT 0 COMMENT '模型 id',
+  `model_name` varchar(64) NOT NULL DEFAULT '' COMMENT '模型名称快照',
+  `prompt_tokens` int(11) NOT NULL DEFAULT 0 COMMENT '输入 Token 数',
+  `completion_tokens` int(11) NOT NULL DEFAULT 0 COMMENT '输出 Token 数',
+  `total_tokens` int(11) NOT NULL DEFAULT 0 COMMENT '总消耗 Token 数',
+  `channel` tinyint(4) NOT NULL DEFAULT 1 COMMENT '调用渠道：1=网页 Playground；2=API Key',
+  `request_id` varchar(64) NOT NULL DEFAULT '' COMMENT '客户端幂等请求 ID',
+  `create_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '调用时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  INDEX `idx_user_id_time`(`user_id`, `create_time`) USING BTREE
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_general_ci ROW_FORMAT = Compact;
 
 SET FOREIGN_KEY_CHECKS = 1;

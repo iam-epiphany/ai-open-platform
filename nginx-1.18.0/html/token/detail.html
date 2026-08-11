@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>活动详情 - AI 开放平台</title>
+  <link rel="stylesheet" href="css/element.css">
+  <link rel="stylesheet" href="css/token.css">
+  <link rel="icon" href="favicon.ico">
+</head>
+<body>
+<div id="app" v-cloak>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="logo" href="index.html">⚡ AI 开放平台</a>
+      <div class="topbar-right">
+        <template v-if="logged">
+          <a class="link" href="playground.html">模型调用</a>
+          <a class="link" href="apps.html">API 管理</a>
+          <a class="link" href="billing.html">账单</a>
+          <a class="link" href="orders.html">订单</a>
+          <a class="link" v-if="isAdmin" href="admin.html">管理后台</a>
+          <span class="nick">{{ me.nickName }}</span>
+          <el-button size="small" @click="logout">退出</el-button>
+        </template>
+        <template v-else>
+          <el-button size="small" type="primary" @click="goLogin">登录 / 注册</el-button>
+        </template>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <div v-loading="loading">
+      <template v-if="activity">
+        <div class="detail-banner">
+          <h2>{{ activity.title }}</h2>
+          <p>{{ formatTime(activity.startTime) }} ~ {{ formatTime(activity.endTime) }}</p>
+          <p class="countdown">{{ countdownText }}</p>
+        </div>
+
+        <div class="sku-grid">
+          <div class="sku-card" v-for="sku in skus" :key="sku.id">
+            <div class="sku-model">{{ sku.modelName }}</div>
+            <div class="sku-name">{{ sku.packageName }}</div>
+            <div class="sku-tokens">{{ formatTokens(sku.tokenAmount) }}<span class="unit">Tokens</span></div>
+            <div class="sku-meta">
+              <el-tag size="mini" :type="sku.type === 1 ? 'success' : 'warning'">
+                {{ sku.type === 1 ? '限时体验 · 每人限 1 份' : '企业共享 · 每人限 ' + sku.limitCount + ' 份' }}
+              </el-tag>
+            </div>
+            <div class="sku-meta">
+              <span class="stock" :class="{ zero: sku.stock <= 0 }">剩余 {{ sku.stock }} 份</span>
+              <span style="font-size:12px;color:#909399;">{{ formatTime(sku.beginTime) }} 开抢</span>
+            </div>
+            <el-button
+                type="primary"
+                size="small"
+                round
+                :disabled="btnState(sku).disabled"
+                :loading="grantingSku === sku.id"
+                @click="grant(sku)">
+              {{ btnState(sku).text }}
+            </el-button>
+          </div>
+        </div>
+      </template>
+      <el-empty v-else-if="!loading" description="活动不存在或已下线"></el-empty>
+    </div>
+  </main>
+</div>
+
+<script src="js/vue.js"></script>
+<script src="js/element.js"></script>
+<script src="js/axios.min.js"></script>
+<script src="js/common.js"></script>
+<script src="js/api.js"></script>
+<script>
+  Vue.use(ELEMENT);
+  new Vue({
+    el: '#app',
+    mixins: [topbarMixin],
+    data: function () {
+      return {
+        activityId: new URLSearchParams(location.search).get('id'),
+        loading: false,
+        activity: null,
+        skus: [],
+        grantingSku: null,
+        now: Date.now(),
+        timer: null
+      };
+    },
+    computed: {
+      countdownText: function () {
+        var s = new Date(this.activity.startTime).getTime();
+        var e = new Date(this.activity.endTime).getTime();
+        var n = this.now;
+        if (n < s) return '⏳ 距开始还有 ' + this.diffText(s - n);
+        if (n > e) return '活动已结束';
+        return '🔥 距结束还有 ' + this.diffText(e - n);
+      }
+    },
+    created: function () {
+      this.load();
+      var self = this;
+      this.timer = setInterval(function () { self.now = Date.now(); }, 1000);
+    },
+    destroyed: function () {
+      if (this.timer) clearInterval(this.timer);
+    },
+    methods: {
+      load: function () {
+        var self = this;
+        this.loading = true;
+        api.getActivity(this.activityId).then(function (res) {
+          var data = res.data;
+          if (!data) {
+            self.activity = null;
+            self.skus = [];
+            return;
+          }
+          self.activity = data.activity;
+          self.skus = data.skus || [];
+        }).catch(showError).then(function () {
+          self.loading = false;
+        });
+      },
+      diffText: function (ms) {
+        var s = Math.floor(ms / 1000);
+        var d = Math.floor(s / 86400);
+        var h = Math.floor(s % 86400 / 3600);
+        var m = Math.floor(s % 3600 / 60);
+        var sec = s % 60;
+        if (d > 0) return d + '天 ' + h + '小时';
+        if (h > 0) return h + '小时 ' + m + '分 ' + sec + '秒';
+        return m + '分 ' + sec + '秒';
+      },
+      btnState: function (sku) {
+        var n = this.now;
+        var s = new Date(this.activity.startTime).getTime();
+        var e = new Date(this.activity.endTime).getTime();
+        if (n < s) return { text: '未开始', disabled: true };
+        if (n > e) return { text: '已结束', disabled: true };
+        if (sku.stock <= 0) return { text: '已抢完', disabled: true };
+        if (!this.logged) return { text: '登录后领取', disabled: false };
+        return { text: '立即领取', disabled: false };
+      },
+      grant: function (sku) {
+        var self = this;
+        if (!this.logged) {
+          this.goLogin();
+          return;
+        }
+        ELEMENT.MessageBox.confirm(
+            '确认领取「' + sku.packageName + '」？每人限领，先到先得。',
+            '领取确认',
+            { confirmButtonText: '立即领取', cancelButtonText: '再想想', type: 'warning' }
+        ).then(function () {
+          self.grantingSku = sku.id;
+          api.grant(sku.id).then(function (res) {
+            var data = res.data || {};
+            ELEMENT.MessageBox.alert(
+                '领取成功！<br/>订单号：' + data.orderId +
+                '<br/>剩余库存：' + data.remainStock +
+                '<br/><br/>Token 正在发放，稍后可在「我的订单」中查看。',
+                '🎉 抢购成功',
+                { dangerouslyUseHTMLString: true, confirmButtonText: '知道了' }
+            ).then(function () {
+              self.load();
+            });
+          }).catch(showError).then(function () {
+            self.grantingSku = null;
+          });
+        }).catch(function () {});
+      }
+    }
+  });
+</script>
+</body>
+</html>

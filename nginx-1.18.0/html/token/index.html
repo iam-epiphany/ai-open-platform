@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI 开放平台 - 控制台</title>
+  <link rel="stylesheet" href="css/element.css">
+  <link rel="stylesheet" href="css/token.css">
+  <link rel="icon" href="favicon.ico">
+</head>
+<body>
+<div id="app" v-cloak>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="logo" href="index.html">⚡ AI 开放平台</a>
+      <div class="topbar-right">
+        <template v-if="logged">
+          <a class="link" href="playground.html">模型调用</a>
+          <a class="link" href="apps.html">API 管理</a>
+          <a class="link" href="billing.html">账单</a>
+          <a class="link" href="orders.html">订单</a>
+          <a class="link" href="me.html">个人中心</a>
+          <a class="link" v-if="isAdmin" href="admin.html">管理后台</a>
+          <span class="nick">{{ me.nickName }}</span>
+          <el-button size="small" @click="logout">退出</el-button>
+        </template>
+        <template v-else>
+          <el-button size="small" type="primary" @click="goLogin">登录 / 注册</el-button>
+        </template>
+      </div>
+    </div>
+  </header>
+
+  <main class="container" v-loading="loading">
+    <h2 class="page-title">👋 控制台</h2>
+
+    <!-- 余额总览 -->
+    <div class="stat-grid">
+      <div class="stat-card" v-for="pool in pools" :key="pool.modelId">
+        <div class="label">{{ pool.modelName }}</div>
+        <div class="value">{{ formatTokens(pool.balance) }}<span class="unit">Tokens</span></div>
+        <div style="font-size:12px;color:#909399;margin-top:4px;">累计 {{ formatTokens(pool.totalTokens) }} · 已用 {{ formatTokens(pool.usedTokens) }}</div>
+      </div>
+    </div>
+
+    <!-- 模型调用 -->
+    <div class="panel" style="margin-bottom:20px;">
+      <div class="panel-title">🤖 模型调用（模拟计费）</div>
+      <div class="model-grid">
+        <div class="model-card" v-for="m in models" :key="m.modelId">
+          <div class="model-name">{{ m.modelName }}</div>
+          <div class="model-desc">按 Token 消耗扣费，余额不足自动拦截</div>
+          <el-button type="primary" size="small" round @click="goPlayground(m.modelId)">去调用</el-button>
+        </div>
+      </div>
+      <el-empty v-if="!loading && models.length === 0" description="暂无在售模型"></el-empty>
+    </div>
+
+    <!-- 限时活动 -->
+    <div class="panel">
+      <div class="panel-title" style="display:flex;justify-content:space-between;align-items:center;">
+        <span>🔥 限时活动 · 限量 Token 包</span>
+        <el-button size="mini" type="text" @click="goOrders">我的订单</el-button>
+      </div>
+      <div class="activity-card" style="box-shadow:none;padding:0 0 4px;" v-for="act in activities" :key="act.activity.id">
+        <div class="activity-head">
+          <div>
+            <h3 class="activity-title">{{ act.activity.title }}</h3>
+            <p class="activity-time">{{ formatTime(act.activity.startTime) }} ~ {{ formatTime(act.activity.endTime) }}</p>
+          </div>
+          <el-tag :type="statusType(act)" size="small">{{ statusText(act) }}</el-tag>
+        </div>
+        <div class="sku-grid">
+          <div class="sku-card" v-for="sku in act.skus" :key="sku.id">
+            <div class="sku-model">{{ sku.modelName || '通用池' }}</div>
+            <div class="sku-name">{{ sku.packageName }}</div>
+            <div class="sku-tokens">{{ formatTokens(sku.tokenAmount) }}<span class="unit">Tokens</span></div>
+            <div class="sku-meta">
+              <el-tag size="mini" :type="sku.type === 1 ? 'success' : 'warning'">
+                {{ sku.type === 1 ? '限时体验' : '企业共享' }}
+              </el-tag>
+              <span class="stock" :class="{ zero: sku.stock <= 0 }">剩余 {{ sku.stock }} 份</span>
+            </div>
+            <el-button type="warning" size="small" round @click="goDetail(act.activity.id)">去抢购</el-button>
+          </div>
+        </div>
+      </div>
+      <el-empty v-if="!loading && activities.length === 0" description="暂无进行中的活动"></el-empty>
+    </div>
+  </main>
+</div>
+
+<script src="js/vue.js"></script>
+<script src="js/element.js"></script>
+<script src="js/axios.min.js"></script>
+<script src="js/common.js"></script>
+<script src="js/api.js"></script>
+<script>
+  Vue.use(ELEMENT);
+  new Vue({
+    el: '#app',
+    mixins: [topbarMixin],
+    data: function () {
+      return {
+        loading: false,
+        pools: [],
+        models: [],
+        activities: []
+      };
+    },
+    created: function () {
+      this.load();
+    },
+    methods: {
+      load: function () {
+        var self = this;
+        this.loading = true;
+        Promise.all([api.billingSummary(), api.listModels(), api.listActivities()]).then(function (results) {
+          var summary = results[0].data || {};
+          self.pools = summary.pools || [];
+          self.models = results[1].data || [];
+          self.activities = results[2].data || [];
+        }).catch(showError).then(function () {
+          self.loading = false;
+        });
+      },
+      statusText: function (act) {
+        var now = Date.now();
+        var s = new Date(act.activity.startTime).getTime();
+        var e = new Date(act.activity.endTime).getTime();
+        if (now < s) return '未开始';
+        if (now > e) return '已结束';
+        return '进行中';
+      },
+      statusType: function (act) {
+        var t = this.statusText(act);
+        if (t === '进行中') return 'success';
+        if (t === '未开始') return 'warning';
+        return 'info';
+      },
+      goPlayground: function (modelId) {
+        location.href = '/playground.html' + (modelId ? '?modelId=' + modelId : '');
+      },
+      goDetail: function (id) {
+        location.href = '/detail.html?id=' + id;
+      },
+      goOrders: function () {
+        location.href = '/orders.html';
+      }
+    }
+  });
+</script>
+</body>
+</html>

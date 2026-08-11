@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>账单 - AI 开放平台</title>
+  <link rel="stylesheet" href="css/element.css">
+  <link rel="stylesheet" href="css/token.css">
+  <link rel="icon" href="favicon.ico">
+</head>
+<body>
+<div id="app" v-cloak>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="logo" href="index.html">⚡ AI 开放平台</a>
+      <div class="topbar-right">
+        <template v-if="logged">
+          <a class="link" href="index.html">控制台</a>
+          <a class="link" href="playground.html">模型调用</a>
+          <a class="link" href="apps.html">API 管理</a>
+          <a class="link" href="orders.html">订单</a>
+          <a class="link" href="me.html">个人中心</a>
+          <a class="link" v-if="isAdmin" href="admin.html">管理后台</a>
+          <span class="nick">{{ me.nickName }}</span>
+          <el-button size="small" @click="logout">退出</el-button>
+        </template>
+        <template v-else>
+          <el-button size="small" type="primary" @click="goLogin">登录 / 注册</el-button>
+        </template>
+      </div>
+    </div>
+  </header>
+
+  <main class="container" v-loading="loading">
+    <h2 class="page-title">📊 账单中心</h2>
+
+    <!-- 用量总览 -->
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="label">今日消耗</div>
+        <div class="value">{{ formatTokens(summary.todayTokens) }}<span class="unit">Tokens</span></div>
+      </div>
+      <div class="stat-card">
+        <div class="label">近 30 天消耗</div>
+        <div class="value">{{ formatTokens(summary.monthTokens) }}<span class="unit">Tokens</span></div>
+      </div>
+      <div class="stat-card">
+        <div class="label">累计消耗</div>
+        <div class="value">{{ formatTokens(summary.totalTokens) }}<span class="unit">Tokens</span></div>
+      </div>
+      <div class="stat-card">
+        <div class="label">额度池</div>
+        <div class="value" style="font-size:20px;">{{ pools.length }}<span class="unit">个</span></div>
+      </div>
+    </div>
+
+    <!-- 额度池余额 -->
+    <div class="panel" style="margin-bottom:20px;">
+      <div class="panel-title">💰 各额度池余额</div>
+      <div class="stat-grid" style="margin-bottom:0;">
+        <div class="stat-card" v-for="pool in pools" :key="pool.modelId">
+          <div class="label">{{ pool.modelName }}</div>
+          <div class="value">{{ formatTokens(pool.balance) }}<span class="unit">Tokens</span></div>
+          <div style="font-size:12px;color:#909399;margin-top:4px;">累计 {{ formatTokens(pool.totalTokens) }} · 已用 {{ formatTokens(pool.usedTokens) }}</div>
+        </div>
+      </div>
+      <el-empty v-if="!loading && pools.length === 0" description="暂无额度，去活动页领取 Token 包吧"></el-empty>
+    </div>
+
+    <!-- 每日消耗柱状图 -->
+    <div class="panel" style="margin-bottom:20px;">
+      <div class="panel-title">📈 近 7 天消耗（Tokens）</div>
+      <div class="bar-chart">
+        <div class="bar-item" v-for="d in daily" :key="d.day">
+          <div class="bar-value">{{ formatTokens(d.tokens) }}</div>
+          <div class="bar" :style="{ height: barHeight(d.tokens) }"></div>
+          <div class="bar-label">{{ d.day.substring(5) }}</div>
+        </div>
+      </div>
+      <el-empty v-if="!loading && daily.length === 0" description="近 7 天暂无消耗"></el-empty>
+    </div>
+
+    <!-- 账本流水 -->
+    <div class="panel">
+      <div class="panel-title" style="display:flex;justify-content:space-between;align-items:center;">
+        <span>🧾 账本流水</span>
+        <el-radio-group v-model="changeType" size="small" @change="loadRecords">
+          <el-radio-button label="">全部</el-radio-button>
+          <el-radio-button label="1">发放</el-radio-button>
+          <el-radio-button label="2">消耗</el-radio-button>
+        </el-radio-group>
+      </div>
+      <el-table v-loading="loading" :data="records" style="width:100%">
+        <el-table-column prop="id" label="流水号" width="120"></el-table-column>
+        <el-table-column label="类型" width="100">
+          <template slot-scope="scope">
+            <el-tag size="mini" :type="scope.row.changeType === 1 ? 'success' : 'danger'">
+              {{ scope.row.changeType === 1 ? '发放' : '消耗' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="变动额度">
+          <template slot-scope="scope">
+            <span :style="{ color: scope.row.changeType === 1 ? '#67c23a' : '#f56c6c' }">
+              {{ scope.row.changeType === 1 ? '+' : '-' }}{{ formatTokens(scope.row.changeAmount) }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="变动后余额">
+          <template slot-scope="scope">{{ formatTokens(scope.row.balanceAfter) }}</template>
+        </el-table-column>
+        <el-table-column prop="orderId" label="关联订单" width="160">
+          <template slot-scope="scope">{{ scope.row.orderId === 0 ? '-' : scope.row.orderId }}</template>
+        </el-table-column>
+        <el-table-column label="时间">
+          <template slot-scope="scope">{{ formatTime(scope.row.createTime) }}</template>
+        </el-table-column>
+      </el-table>
+      <div style="text-align:center;margin-top:14px;">
+        <el-pagination
+            layout="prev, pager, next, total"
+            :total="total"
+            :page-size="10"
+            :current-page.sync="current"
+            @current-change="loadRecords"></el-pagination>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="js/vue.js"></script>
+<script src="js/element.js"></script>
+<script src="js/axios.min.js"></script>
+<script src="js/common.js"></script>
+<script src="js/api.js"></script>
+<script>
+  Vue.use(ELEMENT);
+  new Vue({
+    el: '#app',
+    mixins: [topbarMixin],
+    data: function () {
+      return {
+        loading: false,
+        summary: { todayTokens: 0, monthTokens: 0, totalTokens: 0 },
+        pools: [],
+        daily: [],
+        records: [],
+        total: 0,
+        current: 1,
+        changeType: ''
+      };
+    },
+    created: function () {
+      this.load();
+    },
+    methods: {
+      load: function () {
+        var self = this;
+        this.loading = true;
+        Promise.all([api.billingSummary(), api.billingDaily(7), api.billingRecords('', 1, 10)]).then(function (results) {
+          self.summary = results[0].data || {};
+          self.pools = self.summary.pools || [];
+          self.daily = results[1].data || [];
+          var rec = results[2];
+          self.records = rec.data || [];
+          self.total = rec.total || 0;
+        }).catch(showError).then(function () {
+          self.loading = false;
+        });
+      },
+      loadRecords: function () {
+        var self = this;
+        this.loading = true;
+        api.billingRecords(this.changeType, this.current, 10).then(function (res) {
+          self.records = res.data || [];
+          self.total = res.total || 0;
+        }).catch(showError).then(function () {
+          self.loading = false;
+        });
+      },
+      barHeight: function (tokens) {
+        var max = 0;
+        this.daily.forEach(function (d) { if (d.tokens > max) max = d.tokens; });
+        if (max <= 0) return '2px';
+        var pct = Math.max(4, Math.round(Number(tokens) / max * 100));
+        return pct + '%';
+      }
+    }
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,216 @@
+/* AI 开放平台前端样式 */
+[v-cloak] { display: none; }
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: #f5f7fa;
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: #303133;
+}
+
+/* ===== 顶栏 ===== */
+.topbar {
+  background: linear-gradient(90deg, #1f2d3d, #263445);
+  color: #fff;
+}
+.topbar-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+}
+.logo { color: #fff; font-size: 18px; font-weight: 600; text-decoration: none; letter-spacing: 1px; }
+.topbar-right { display: flex; align-items: center; gap: 16px; }
+.nick { color: #ffd04b; font-size: 14px; }
+.link { color: #dcdfe6; text-decoration: none; font-size: 14px; }
+.link:hover { color: #fff; }
+
+/* ===== 布局 ===== */
+.container { max-width: 1100px; margin: 24px auto; padding: 0 16px; }
+.page-title { font-size: 20px; margin: 8px 0 20px; }
+
+/* ===== 活动卡片 ===== */
+.activity-card {
+  background: #fff;
+  border-radius: 10px;
+  padding: 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .06);
+}
+.activity-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
+.activity-title { margin: 0 0 6px; font-size: 17px; }
+.activity-time { margin: 0; color: #909399; font-size: 13px; }
+
+.sku-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; }
+.sku-card {
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: box-shadow .2s;
+}
+.sku-card:hover { box-shadow: 0 4px 12px rgba(0, 0, 0, .1); }
+.sku-model { font-size: 13px; color: #409eff; font-weight: 600; }
+.sku-name { font-size: 15px; font-weight: 600; }
+.sku-tokens { font-size: 26px; font-weight: 700; color: #f56c6c; }
+.sku-tokens .unit { font-size: 12px; color: #909399; margin-left: 4px; font-weight: 400; }
+.sku-meta { display: flex; justify-content: space-between; align-items: center; }
+.stock { font-size: 12px; color: #67c23a; }
+.stock.zero { color: #f56c6c; }
+
+/* ===== 详情页 ===== */
+.detail-banner {
+  background: linear-gradient(120deg, #2b5876, #4e4376);
+  color: #fff;
+  border-radius: 10px;
+  padding: 28px 24px;
+  margin-bottom: 20px;
+}
+.detail-banner h2 { margin: 0 0 8px; font-size: 22px; }
+.detail-banner p { margin: 0; color: #c0c4cc; font-size: 13px; }
+.countdown { font-size: 14px; color: #ffd04b; margin-top: 10px; }
+
+/* ===== 个人中心 ===== */
+.quota-card {
+  background: linear-gradient(120deg, #409eff, #67c23a);
+  border-radius: 10px;
+  color: #fff;
+  padding: 24px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 8px rgba(64, 158, 255, .3);
+}
+.quota-card .balance { font-size: 34px; font-weight: 700; margin: 6px 0; }
+.quota-card .balance .unit { font-size: 13px; font-weight: 400; opacity: .85; margin-left: 4px; }
+.quota-card .sub { font-size: 13px; opacity: .9; }
+
+.user-card {
+  background: #fff;
+  border-radius: 10px;
+  padding: 20px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 20px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .06);
+}
+.avatar {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: #409eff;
+  color: #fff;
+  font-size: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.avatar img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+.user-name { font-size: 18px; font-weight: 600; }
+.user-id { font-size: 13px; color: #909399; margin-top: 4px; }
+
+.panel { background: #fff; border-radius: 10px; padding: 20px; box-shadow: 0 1px 4px rgba(0, 0, 0, .06); }
+.panel-title { font-size: 15px; font-weight: 600; margin: 0 0 16px; }
+
+/* ===== 登录页 ===== */
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #1f2d3d 0%, #263445 60%, #2b5876 100%);
+}
+.login-card {
+  width: 380px;
+  background: #fff;
+  border-radius: 12px;
+  padding: 36px 32px 28px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .2);
+}
+.login-title { text-align: center; font-size: 20px; font-weight: 700; margin: 0 0 6px; }
+.login-sub { text-align: center; color: #909399; font-size: 13px; margin: 0 0 24px; }
+.login-tip { font-size: 12px; color: #909399; margin-top: 12px; line-height: 1.6; }
+
+/* ===== AI 开放平台 ===== */
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; margin-bottom: 20px; }
+.stat-card {
+  background: #fff;
+  border-radius: 10px;
+  padding: 18px 20px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .06);
+}
+.stat-card .label { font-size: 13px; color: #909399; }
+.stat-card .value { font-size: 26px; font-weight: 700; margin-top: 6px; color: #303133; }
+.stat-card .value .unit { font-size: 12px; font-weight: 400; color: #909399; margin-left: 2px; }
+
+/* 模型卡片 */
+.model-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+.model-card {
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: box-shadow .2s;
+  background: #fff;
+}
+.model-card:hover { box-shadow: 0 4px 12px rgba(0, 0, 0, .1); }
+.model-card .model-name { font-size: 16px; font-weight: 600; }
+.model-card .model-desc { font-size: 13px; color: #909399; }
+
+/* 柱状图（纯 div 实现，不引图表库） */
+.bar-chart { display: flex; align-items: flex-end; gap: 12px; height: 160px; padding: 10px 4px 0; }
+.bar-item { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 6px; height: 100%; }
+.bar-item .bar {
+  width: 100%;
+  max-width: 44px;
+  border-radius: 4px 4px 0 0;
+  background: linear-gradient(180deg, #409eff, #67c23a);
+  min-height: 2px;
+}
+.bar-item .bar-label { font-size: 12px; color: #909399; }
+.bar-item .bar-value { font-size: 12px; color: #606266; }
+
+/* Playground 聊天区 */
+.chat-box {
+  background: #fff;
+  border-radius: 10px;
+  padding: 20px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .06);
+  margin-bottom: 20px;
+}
+.chat-reply {
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #f5f7fa;
+  border-radius: 8px;
+  padding: 16px;
+  margin-top: 12px;
+  font-size: 14px;
+  line-height: 1.8;
+  color: #303133;
+  min-height: 60px;
+}
+.usage-line { display: flex; gap: 24px; margin-top: 12px; font-size: 13px; color: #909399; flex-wrap: wrap; }
+.usage-line b { color: #409eff; }
+
+/* API Key 明文展示 */
+.key-box {
+  background: #fdf6ec;
+  border: 1px solid #e6a23c;
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-family: Consolas, Monaco, monospace;
+  font-size: 14px;
+  color: #e6a23c;
+  word-break: break-all;
+  margin: 8px 0;
+}
+
+/* 管理后台概览 */
+.mono { font-family: Consolas, Monaco, monospace; }

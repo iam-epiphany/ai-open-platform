@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>API 管理 - AI 开放平台</title>
+  <link rel="stylesheet" href="css/element.css">
+  <link rel="stylesheet" href="css/token.css">
+  <link rel="icon" href="favicon.ico">
+</head>
+<body>
+<div id="app" v-cloak>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="logo" href="index.html">⚡ AI 开放平台</a>
+      <div class="topbar-right">
+        <template v-if="logged">
+          <a class="link" href="index.html">控制台</a>
+          <a class="link" href="playground.html">模型调用</a>
+          <a class="link" href="billing.html">账单</a>
+          <a class="link" href="orders.html">订单</a>
+          <a class="link" href="me.html">个人中心</a>
+          <a class="link" v-if="isAdmin" href="admin.html">管理后台</a>
+          <span class="nick">{{ me.nickName }}</span>
+          <el-button size="small" @click="logout">退出</el-button>
+        </template>
+        <template v-else>
+          <el-button size="small" type="primary" @click="goLogin">登录 / 注册</el-button>
+        </template>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <div class="panel" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+      <div class="panel-title" style="margin:0;">🔑 我的应用与 API Key</div>
+      <el-button type="primary" size="small" @click="dialogVisible = true">创建应用</el-button>
+    </div>
+
+    <div class="panel" style="margin-bottom:20px;">
+      <div style="font-size:13px;color:#606266;line-height:1.8;">
+        使用方式：调用 <code class="mono">/api/ai/chat</code> 时在请求头携带
+        <code class="mono">X-Api-Key: &lt;你的密钥&gt;</code>，系统按你的 Token 余额计费。
+        密钥明文仅在创建时显示一次，库中只保存哈希，请妥善保管。
+      </div>
+    </div>
+
+    <div class="panel" v-for="item in apps" :key="item.app.id" style="margin-bottom:16px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <div>
+          <span style="font-size:15px;font-weight:600;">{{ item.app.appName }}</span>
+          <el-tag size="mini" :type="item.app.status === 1 ? 'success' : 'info'" style="margin-left:8px;">
+            {{ item.app.status === 1 ? '启用' : '停用' }}
+          </el-tag>
+          <span style="font-size:12px;color:#909399;margin-left:8px;">创建于 {{ formatTime(item.app.createTime) }}</span>
+        </div>
+        <div>
+          <el-button size="mini" type="primary" plain @click="createKey(item.app)">新建密钥</el-button>
+          <el-button size="mini" type="danger" plain @click="removeApp(item.app)">删除应用</el-button>
+        </div>
+      </div>
+      <p style="font-size:13px;color:#909399;margin:0 0 10px;">{{ item.app.description || '暂无描述' }}</p>
+
+      <el-table :data="item.keys" size="mini" style="width:100%;">
+        <el-table-column label="密钥前缀" width="220">
+          <template slot-scope="scope">
+            <span class="mono">{{ scope.row.keyPrefix }}****</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="120">
+          <template slot-scope="scope">
+            <el-tag size="mini" :type="scope.row.status === 1 ? 'success' : 'info'">
+              {{ scope.row.status === 1 ? '启用' : '已禁用' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="最近使用">
+          <template slot-scope="scope">{{ formatTime(scope.row.lastUsedTime) }}</template>
+        </el-table-column>
+        <el-table-column label="创建时间">
+          <template slot-scope="scope">{{ formatTime(scope.row.createTime) }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="160">
+          <template slot-scope="scope">
+            <el-button size="mini" type="text" @click="toggleKey(scope.row)">
+              {{ scope.row.status === 1 ? '禁用' : '启用' }}
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </div>
+
+    <el-empty v-if="!loading && apps.length === 0" description="还没有应用，点击右上角「创建应用」开始"></el-empty>
+
+    <!-- 创建应用弹窗 -->
+    <el-dialog title="创建应用" :visible.sync="dialogVisible" width="420px">
+      <el-form label-width="70px">
+        <el-form-item label="应用名称">
+          <el-input v-model.trim="appForm.appName" placeholder="例如：智能客服助手" maxlength="32"></el-input>
+        </el-form-item>
+        <el-form-item label="描述">
+          <el-input v-model.trim="appForm.description" type="textarea" :rows="2" placeholder="选填"></el-input>
+        </el-form-item>
+      </el-form>
+      <span slot="footer">
+        <el-button size="small" @click="dialogVisible = false">取消</el-button>
+        <el-button size="small" type="primary" :loading="creating" @click="submitApp">创建并生成密钥</el-button>
+      </span>
+    </el-dialog>
+
+    <!-- 密钥明文展示（仅一次） -->
+    <el-dialog title="密钥已生成" :visible.sync="keyVisible" width="460px" :close-on-click-modal="false">
+      <p style="font-size:13px;color:#e6a23c;margin:0 0 4px;">⚠️ 密钥仅显示这一次，请立即复制保存。库中只保存哈希，关闭后无法再次查看。</p>
+      <div class="key-box">{{ plainKey }}</div>
+      <span slot="footer">
+        <el-button size="small" type="primary" @click="copyKey">复制密钥</el-button>
+        <el-button size="small" @click="keyVisible = false; load()">我已保存</el-button>
+      </span>
+    </el-dialog>
+  </main>
+</div>
+
+<script src="js/vue.js"></script>
+<script src="js/element.js"></script>
+<script src="js/axios.min.js"></script>
+<script src="js/common.js"></script>
+<script src="js/api.js"></script>
+<script>
+  Vue.use(ELEMENT);
+  new Vue({
+    el: '#app',
+    mixins: [topbarMixin],
+    data: function () {
+      return {
+        loading: false,
+        apps: [],
+        dialogVisible: false,
+        creating: false,
+        appForm: { appName: '', description: '' },
+        keyVisible: false,
+        plainKey: ''
+      };
+    },
+    created: function () {
+      this.load();
+    },
+    methods: {
+      load: function () {
+        var self = this;
+        this.loading = true;
+        api.listApps().then(function (res) {
+          self.apps = res.data || [];
+        }).catch(showError).then(function () {
+          self.loading = false;
+        });
+      },
+      submitApp: function () {
+        var self = this;
+        if (!this.appForm.appName.trim()) {
+          ELEMENT.Message.warning('请输入应用名称');
+          return;
+        }
+        this.creating = true;
+        api.createApp(this.appForm.appName, this.appForm.description).then(function (res) {
+          self.dialogVisible = false;
+          self.plainKey = res.data.apiKeyPlain;
+          self.keyVisible = true;
+          self.appForm = { appName: '', description: '' };
+          self.load();
+        }).catch(showError).then(function () {
+          self.creating = false;
+        });
+      },
+      createKey: function (app) {
+        var self = this;
+        api.createAppKey(app.id).then(function (res) {
+          self.plainKey = res.data.apiKeyPlain;
+          self.keyVisible = true;
+        }).catch(showError);
+      },
+      toggleKey: function (key) {
+        var self = this;
+        var target = key.status === 1 ? 0 : 1;
+        api.toggleAppKey(key.id, target).then(function () {
+          ELEMENT.Message.success(target === 1 ? '已启用' : '已禁用');
+          self.load();
+        }).catch(showError);
+      },
+      removeApp: function (app) {
+        var self = this;
+        ELEMENT.MessageBox.confirm('删除应用「' + app.appName + '」将同时删除其全部密钥，确定？', '删除确认', {
+          type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消'
+        }).then(function () {
+          api.deleteApp(app.id).then(function () {
+            ELEMENT.Message.success('已删除');
+            self.load();
+          }).catch(showError);
+        }).catch(function () {});
+      },
+      copyKey: function () {
+        var ta = document.createElement('textarea');
+        ta.value = this.plainKey;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        ELEMENT.Message.success('已复制到剪贴板');
+      }
+    }
+  });
+</script>
+</body>
+</html>
