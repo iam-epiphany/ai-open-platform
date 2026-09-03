@@ -1,7 +1,7 @@
 package com.aiopenplatform.utils;
 
 /**
- * @author 虎哥
+ * 常用校验正则常量（手机号、邮箱等）。
  */
 public abstract class RegexPatterns {
     /**

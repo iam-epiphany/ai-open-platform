@@ -11,12 +11,7 @@ import java.io.Serializable;
 import java.time.LocalDateTime;
 
 /**
- * <p>
- * 
- * </p>
- *
- * @author 虎哥
- * @since 2021-12-22
+ * 平台用户：登录、活动领取、应用与 Credits 账户的主体。
  */
 @Data
 @EqualsAndHashCode(callSuper = false)

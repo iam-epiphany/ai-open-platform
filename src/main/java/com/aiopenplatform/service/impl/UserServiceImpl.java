@@ -32,12 +32,8 @@ import static com.aiopenplatform.utils.RedisConstants.*;
 import static com.aiopenplatform.utils.SystemConstants.USER_NICK_NAME_PREFIX;
 
 /**
- * <p>
- * 服务实现类
- * </p>
- *
- * @author 虎哥
- * @since 2021-12-22
+ * 用户服务实现：手机验证码登录、按手机号创建用户与登录态管理。
+ * 登录 token 存于 Redis（login:token:*），仅用于控制台接口；/v1 网关使用独立的 API Key 鉴权。
  */
 @Service
 @Slf4j
