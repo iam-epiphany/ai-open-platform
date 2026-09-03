@@ -59,3 +59,7 @@ ai:
   deepseek:
     base-url: https://api.deepseek.com
     api-key: ${DEEPSEEK_API_KEY:}
+  # API Key 级租户配额（每 Key 每分钟）：RPM=请求数（令牌桶），TPM=token 数（滑动窗口，按预占估算记账）
+  limits:
+    rpm-per-key: ${AI_RPM_PER_KEY:120}
+    tpm-per-key: ${AI_TPM_PER_KEY:200000}

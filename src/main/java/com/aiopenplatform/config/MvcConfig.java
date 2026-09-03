@@ -1,9 +1,11 @@
 package com.aiopenplatform.config;
 
 import com.aiopenplatform.cache.ScopeCacheInterceptor;
+import com.aiopenplatform.gateway.KeyRateLimitService;
 import com.aiopenplatform.gateway.PlatformService;
 import com.aiopenplatform.utils.ApiKeyInterceptor;
 import com.aiopenplatform.utils.BlackListInterceptor;
+import com.aiopenplatform.utils.KeyRateLimitInterceptor;
 import com.aiopenplatform.utils.LoginInterceptor;
 import com.aiopenplatform.utils.RateLimitInterceptor;
 import com.aiopenplatform.utils.RefreshTokenInterceptor;
@@ -32,6 +34,9 @@ public class MvcConfig implements WebMvcConfigurer {
 
     @Autowired
     private PlatformService platformService;
+
+    @Autowired
+    private KeyRateLimitService keyRateLimitService;
 
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
@@ -69,5 +74,9 @@ public class MvcConfig implements WebMvcConfigurer {
         registry.addInterceptor(new ApiKeyInterceptor(platformService))
                 .addPathPatterns("/v1/**")
                 .order(4);
+        //6.API Key 级 RPM 限流（租户配额层）：紧跟鉴权之后，Key 身份已就绪；TPM 在服务层按 token 估算校验
+        registry.addInterceptor(new KeyRateLimitInterceptor(keyRateLimitService))
+                .addPathPatterns("/v1/**")
+                .order(5);
     }
 }
