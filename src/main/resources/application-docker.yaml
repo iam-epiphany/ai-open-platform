@@ -1,0 +1,16 @@
+# Docker 部署环境：docker compose -f docker-compose.deploy.yml 启动的容器内网配置
+# 中间件主机名 = compose 服务名（mysql / redis / canal-server），端口用容器内网默认端口
+# 基础配置（默认值、管理员账号、DeepSeek Key 等）继承自 application.yaml
+spring:
+  datasource:
+    url: jdbc:mysql://mysql:3306/token_platform?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+  redis:
+    host: redis
+    port: 6379
+    password: 123456
+
+canal:
+  enabled: true
+  server:
+    host: canal-server
+    port: 11111

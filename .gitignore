@@ -51,3 +51,9 @@ nginx-1.18.0/conf/*
 # jmeter 运行产物与本地测试数据
 jmeter/jmeter.log
 jmeter/tokens.csv
+
+# 部署密钥（.env.example 为模板，可入库）
+.env
+
+# 本地运行日志与临时文件
+tmp/
