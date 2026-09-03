@@ -1,8 +1,6 @@
 package com.aiopenplatform.gateway;
 
-import com.aiopenplatform.dto.UserDTO;
 import com.aiopenplatform.gateway.dto.ChatRequest;
-import com.aiopenplatform.utils.UserHolder;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -37,7 +35,20 @@ public class GatewayController {
     @GetMapping("/models")
     public ResponseEntity<?> models() {
         ApiPrincipal principal = ApiPrincipalHolder.get();
-        return ResponseEntity.ok(java.util.Collections.singletonMap("data", platformService.models(principal == null ? null : principal.getAppId())));
+        java.util.List<Map<String, Object>> models = platformService.models(principal == null ? null : principal.getAppId());
+        java.util.List<Map<String, Object>> data = new java.util.ArrayList<>();
+        for (Map<String, Object> model : models) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("id", model.get("code"));
+            item.put("object", "model");
+            item.put("owned_by", model.get("provider"));
+            item.put("display_name", model.get("display_name"));
+            data.add(item);
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("object", "list");
+        result.put("data", data);
+        return ResponseEntity.ok(result);
     }
 
     private ResponseEntity<Map<String, Object>> error(HttpStatus status, String type, String message) {

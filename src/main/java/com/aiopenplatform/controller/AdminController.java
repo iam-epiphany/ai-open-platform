@@ -9,17 +9,18 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.aiopenplatform.dto.AdminLoginDTO;
 import com.aiopenplatform.dto.Result;
 import com.aiopenplatform.dto.UserDTO;
+import com.aiopenplatform.cache.JvmCaches;
+import com.aiopenplatform.cache.MultiLevelCacheService;
+import com.aiopenplatform.entity.TokenActivity;
 import com.aiopenplatform.entity.TokenCallLog;
-import com.aiopenplatform.entity.TokenLedger;
-import com.aiopenplatform.entity.UserQuota;
+import com.aiopenplatform.entity.TokenSku;
+import com.aiopenplatform.gateway.PlatformService;
 import com.aiopenplatform.mapper.TokenAppMapper;
-import com.aiopenplatform.mapper.TokenLedgerMapper;
 import com.aiopenplatform.mapper.TokenOrderMapper;
 import com.aiopenplatform.mapper.UserMapper;
+import com.aiopenplatform.service.ITokenActivityService;
 import com.aiopenplatform.service.ITokenCallLogService;
-import com.aiopenplatform.service.ITokenLedgerService;
 import com.aiopenplatform.service.ITokenSkuService;
-import com.aiopenplatform.service.IUserQuotaService;
 import com.aiopenplatform.utils.UserHolder;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -77,17 +78,17 @@ public class AdminController {
     @Resource
     private TokenAppMapper appMapper;
     @Resource
-    private TokenLedgerMapper ledgerMapper;
-    @Resource
     private ITokenCallLogService callLogService;
-    @Resource
-    private ITokenLedgerService tokenLedgerService;
-    @Resource
-    private IUserQuotaService userQuotaService;
     @Resource
     private ITokenSkuService skuService;
     @Resource
+    private ITokenActivityService activityService;
+    @Resource
+    private PlatformService platformService;
+    @Resource
     private JdbcTemplate jdbcTemplate;
+    @Resource
+    private MultiLevelCacheService multiLevelCacheService;
 
     /**
      * 管理员账号密码登录：校验通过后签发与普通用户同一套 Redis token，
@@ -95,6 +96,9 @@ public class AdminController {
      */
     @PostMapping("/login")
     public Result login(@RequestBody AdminLoginDTO loginForm, HttpServletRequest request) {
+        if (loginForm == null) {
+            return Result.fail("账号密码不能为空");
+        }
         String username = loginForm.getUsername();
         String password = loginForm.getPassword();
         if (StrUtil.isBlank(username) || StrUtil.isBlank(password)) {
@@ -126,6 +130,7 @@ public class AdminController {
         );
         stringRedisTemplate.opsForHash().putAll(LOGIN_USER_KEY + token, userMap);
         stringRedisTemplate.expire(LOGIN_USER_KEY + token, LOGIN_USER_TTL, TimeUnit.MINUTES);
+        stringRedisTemplate.delete(LOGIN_FAIL_KEY + "ip:" + ip);
         log.info("管理员登录成功: username={}, ip={}", username, ip);
         return Result.ok(token);
     }
@@ -152,7 +157,8 @@ public class AdminController {
         data.put("userCount", userMapper.selectCount(null));
         data.put("orderCount", orderMapper.selectCount(null));
         data.put("appCount", appMapper.selectCount(null));
-        data.put("grantTotal", ledgerMapper.sumByChangeType(1));
+        data.put("grantTotal", jdbcTemplate.queryForObject(
+                "SELECT COALESCE(SUM(change_amount),0) FROM tb_credit_ledger WHERE change_amount>0", Long.class));
         data.put("consumeTotal", callLogService.sumTotalTokens());
         data.put("callCount", callLogService.countTotal());
         return Result.ok(data);
@@ -197,7 +203,7 @@ public class AdminController {
     /**
      * 全部 SKU 列表（含下架，管理后台编辑用）
      */
-    @GetMapping("/skus")
+    @GetMapping({"/credit-packages", "/skus"})
     public Result skus() {
         if (!isAdmin()) {
             return Result.fail("无权限");
@@ -205,41 +211,122 @@ public class AdminController {
         return Result.ok(skuService.list());
     }
 
+    @PostMapping({"/credit-packages", "/skus"})
+    public Result createCreditPackage(@RequestBody TokenSku sku) {
+        if (!isAdmin()) return Result.fail("无权限");
+        String error = validatePackage(sku, false);
+        if (error != null) return Result.fail(error);
+        skuService.createSku(sku);
+        return Result.ok(sku.getId());
+    }
+
+    @PutMapping({"/credit-packages", "/skus"})
+    public Result updateCreditPackage(@RequestBody TokenSku sku) {
+        if (!isAdmin()) return Result.fail("无权限");
+        String error = validatePackage(sku, true);
+        if (error != null) return Result.fail(error);
+        try {
+            skuService.updateSku(sku);
+            return Result.ok();
+        } catch (IllegalArgumentException e) {
+            return Result.fail(e.getMessage());
+        }
+    }
+
+    @GetMapping("/credit-activities")
+    public Result activities() {
+        if (!isAdmin()) return Result.fail("无权限");
+        return Result.ok(activityService.list());
+    }
+
+    @PostMapping("/credit-activities")
+    public Result createActivity(@RequestBody TokenActivity activity) {
+        if (!isAdmin()) return Result.fail("无权限");
+        String error = validateActivity(activity, false);
+        if (error != null) return Result.fail(error);
+        activityService.save(activity);
+        evictActivity(activity.getId());
+        return Result.ok(activity.getId());
+    }
+
+    @PutMapping("/credit-activities")
+    public Result updateActivity(@RequestBody TokenActivity activity) {
+        if (!isAdmin()) return Result.fail("无权限");
+        String error = validateActivity(activity, true);
+        if (error != null) return Result.fail(error);
+        if (!activityService.updateById(activity)) return Result.fail("活动不存在");
+        evictActivity(activity.getId());
+        return Result.ok();
+    }
+
     /**
      * 管理员调整用户额度：type=1 发放；type=2 回收（均写账本流水）
      */
-    @PutMapping("/quota")
+    @PutMapping({"/credits", "/quota"})
     public Result adjustQuota(@RequestBody Map<String, Object> body) {
         if (!isAdmin()) {
             return Result.fail("无权限");
         }
-        Long userId = ((Number) body.get("userId")).longValue();
-        Long modelId = body.get("modelId") == null ? 0L : ((Number) body.get("modelId")).longValue();
-        Long amount = ((Number) body.get("amount")).longValue();
-        Integer type = ((Number) body.get("type")).intValue();
-        if (userId == null || amount == null || amount <= 0 || (type != 1 && type != 2)) {
+        if (body == null) {
             return Result.fail("参数错误");
         }
-        if (type == 1) {
-            userQuotaService.grantQuota(userId, modelId, amount);
-        } else {
-            boolean ok = userQuotaService.deductQuota(userId, modelId, amount);
-            if (!ok) {
-                return Result.fail("该用户余额不足");
+        if (!(body.get("userId") instanceof Number) || !(body.get("amount") instanceof Number)
+                || !(body.get("type") instanceof Number)) {
+            return Result.fail("参数错误");
+        }
+        long userId = ((Number) body.get("userId")).longValue();
+        long amount = ((Number) body.get("amount")).longValue();
+        int type = ((Number) body.get("type")).intValue();
+        if (userId <= 0 || amount <= 0 || (type != 1 && type != 2)) return Result.fail("参数错误");
+        if (userMapper.selectById(userId) == null) return Result.fail("用户不存在");
+        String reference = "A" + java.util.UUID.randomUUID().toString().replace("-", "");
+        try {
+            long balance = platformService.adjustCredits(userId, type == 1 ? amount : -amount, reference,
+                    "管理员" + (type == 1 ? "发放" : "扣减"));
+            log.info("管理员调整 Credits: operator={}, userId={}, type={}, amount={}", currentPhone(), userId, type, amount);
+            return Result.ok(java.util.Collections.singletonMap("balance", balance));
+        } catch (IllegalStateException e) {
+            return Result.fail(e.getMessage());
+        }
+    }
+
+    private String validatePackage(TokenSku sku, boolean requireId) {
+        if (sku == null || (requireId && sku.getId() == null)) return "Credits 包参数不完整";
+        if (StrUtil.isBlank(sku.getPackageName())) return "Credits 包名称不能为空";
+        if (sku.getTokenAmount() == null || sku.getTokenAmount() <= 0) return "Credits 数量必须大于 0";
+        if (sku.getStock() == null || sku.getStock() < 0) return "库存不能小于 0";
+        if (sku.getType() == null || (sku.getType() != 1 && sku.getType() != 2)) return "包类型不正确";
+        if (sku.getStatus() == null || (sku.getStatus() != 0 && sku.getStatus() != 1)) return "状态不正确";
+        if (sku.getType() == 1) sku.setLimitCount(1);
+        if (sku.getLimitCount() == null || sku.getLimitCount() <= 0) return "限购数量必须大于 0";
+        if (sku.getModelId() == null) sku.setModelId(0L);
+        if (sku.getModelName() == null) sku.setModelName("");
+        return null;
+    }
+
+    private String validateActivity(TokenActivity activity, boolean requireId) {
+        if (activity == null || (requireId && activity.getId() == null)) return "活动参数不完整";
+        if (StrUtil.isBlank(activity.getTitle())) return "活动标题不能为空";
+        if (StrUtil.isBlank(activity.getSkuIds())) return "请填写活动包含的 Credits 包 ID";
+        for (String value : activity.getSkuIds().split(",")) {
+            try {
+                Long skuId = Long.valueOf(value.trim());
+                if (skuService.getById(skuId) == null) return "Credits 包 #" + skuId + " 不存在";
+            } catch (NumberFormatException e) {
+                return "Credits 包 ID 格式不正确";
             }
         }
-        // 写账本（管理员操作 order_id=0，balance_after 回读）
-        UserQuota quota = userQuotaService.getQuotaFromDb(userId, modelId);
-        TokenLedger ledger = new TokenLedger();
-        ledger.setUserId(userId);
-        ledger.setOrderId(0L);
-        ledger.setChangeType(type);
-        ledger.setChangeAmount(amount);
-        ledger.setBalanceAfter(quota == null ? 0L : quota.getBalance());
-        tokenLedgerService.save(ledger);
-        log.info("管理员调整额度: operator={}, userId={}, modelId={}, type={}, amount={}",
-                currentPhone(), userId, modelId, type, amount);
-        return Result.ok();
+        if (activity.getStatus() == null || (activity.getStatus() != 0 && activity.getStatus() != 1)) return "活动状态不正确";
+        if (activity.getStartTime() == null || activity.getEndTime() == null) return "请选择活动时间";
+        if (!activity.getStartTime().isBefore(activity.getEndTime())) return "活动开始时间必须早于结束时间";
+        return null;
+    }
+
+    private void evictActivity(Long activityId) {
+        if (activityId != null) {
+            multiLevelCacheService.delete(JvmCaches.CACHE_ACTIVITY,
+                    com.aiopenplatform.utils.RedisConstants.TOKEN_ACTIVITY_KEY + activityId);
+        }
     }
 
     private boolean isAdmin() {

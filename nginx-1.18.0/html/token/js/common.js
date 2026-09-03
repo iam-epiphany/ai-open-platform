@@ -26,6 +26,11 @@ http.interceptors.response.use(function (response) {
 }, function (error) {
     var resp = error.response;
     if (resp && resp.status === 401) {
+        // API Key 校验失败不是网站登录失效，不应该强制跳转。
+        if (error.config && (error.config.headers['X-Api-Key'] || String(error.config.url || '').indexOf('/v1/') >= 0)) {
+            var apiMessage = resp.data && resp.data.error && resp.data.error.message;
+            return Promise.reject(new Error(apiMessage || 'API Key 无效或已停用'));
+        }
         // 未登录 / token 失效：清除本地 token 并跳登录页（带回跳地址）
         sessionStorage.removeItem('token');
         var redirect = encodeURIComponent(location.pathname + location.search);
@@ -38,7 +43,17 @@ http.interceptors.response.use(function (response) {
     if (resp && resp.status === 403) {
         return Promise.reject(new Error('账号已被限制访问，请稍后再试'));
     }
-    return Promise.reject(new Error('网络异常，请稍后再试'));
+    if (resp && resp.status === 404) {
+        return Promise.reject(new Error('接口不存在，请确认 Java 后端已重启并运行最新代码'));
+    }
+    if (resp && resp.status >= 500) {
+        return Promise.reject(new Error('服务器处理失败，请查看后端日志'));
+    }
+    if (error.code === 'ECONNABORTED') {
+        return Promise.reject(new Error('请求超时，请确认后端服务正常运行'));
+    }
+    var detail = resp && resp.data && (resp.data.errorMsg || resp.data.message || (resp.data.error && resp.data.error.message));
+    return Promise.reject(new Error(detail || (resp ? '请求失败（HTTP ' + resp.status + '）' : '无法连接后端服务')));
 });
 
 /** 统一错误提示 */
@@ -51,7 +66,7 @@ function isLogin() {
     return !!sessionStorage.getItem('token');
 }
 
-/** 格式化 Token 数量：123456 → 12.3万；2000000 → 200万 */
+/** 格式化 Credits 数量：123456 → 12.3万；2000000 → 200万 */
 function formatTokens(num) {
     num = Number(num) || 0;
     if (num >= 100000000) {
@@ -113,9 +128,13 @@ var topbarMixin = {
             location.href = '/login.html?redirect=' + encodeURIComponent(location.pathname + location.search);
         },
         logout: function () {
-            sessionStorage.removeItem('token');
-            sessionStorage.removeItem('playgroundApiKey');
-            location.reload();
+            var finish = function () {
+                sessionStorage.removeItem('token');
+                sessionStorage.removeItem('playgroundApiKey');
+                location.replace('/login.html');
+            };
+            // 即使旧后端或网络暂时不可用，也必须完成本地退出。
+            api.logout().then(finish).catch(finish);
         }
     }
 };

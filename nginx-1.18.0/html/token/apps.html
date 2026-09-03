@@ -15,13 +15,13 @@
       <a class="logo" href="index.html">⚡ AI 开放平台</a>
       <div class="topbar-right">
         <template v-if="logged">
-          <a class="link" href="index.html">控制台</a>
-          <a class="link" href="playground.html">模型调用</a>
+          <a class="link" href="index.html">抢购大厅</a>
+          <a class="link" href="orders.html">领取记录</a>
+          <a class="link" href="billing.html">Credits 账本</a>
           <a class="link active" href="apps.html">API 管理</a>
-          <a class="link" href="billing.html">账单</a>
-          <a class="link" href="orders.html?v=nav-keep">订单</a>
+          <a class="link" href="playground.html">消费测试</a>
           <a class="link" href="me.html">个人中心</a>
-          <a class="link" v-if="isAdmin" href="admin.html">管理后台</a>
+          <a class="link" v-if="isAdmin" href="admin.html">运营后台</a>
           <span class="nick">{{ me.nickName }}</span>
           <el-button size="small" @click="logout">退出</el-button>
         </template>
@@ -44,6 +44,16 @@
         <code class="mono">Authorization: Bearer &lt;你的密钥&gt;</code>，系统按真实 usage 从 Credits 余额计费。
         密钥明文仅在创建时显示一次，库中只保存哈希，请妥善保管。
       </div>
+    </div>
+
+    <div class="panel" style="margin-bottom:20px;">
+      <div class="panel-title">对外接入</div>
+      <p style="font-size:13px;color:#606266;line-height:1.8;">这里生成的 <code class="mono">tok_</code> 密钥可在其他程序中使用，调用会消耗当前账户的 Credits。当前支持 OpenAI 兼容的 Chat Completions，目前不支持其他 Agent 所需的 Responses 协议。</p>
+      <div style="font-size:13px;margin-bottom:8px;">Base URL：<code class="mono">{{ baseUrl }}</code> <el-button type="text" @click="copyText(baseUrl)">复制</el-button></div>
+      <pre class="key-box" style="white-space:pre-wrap;line-height:1.6;">curl {{ baseUrl }}/chat/completions \
+  -H "Authorization: Bearer tok_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"deepseek-chat","messages":[{"role":"user","content":"你好"}]}'</pre>
     </div>
 
     <div class="panel" v-for="item in apps" :key="item.app.id" style="margin-bottom:16px;">
@@ -144,6 +154,7 @@
         appForm: { appName: '', description: '' },
         keyVisible: false,
         plainKey: ''
+        ,baseUrl: location.origin + '/api/v1'
       };
     },
     created: function () {
@@ -210,6 +221,9 @@
         document.execCommand('copy');
         document.body.removeChild(ta);
         ELEMENT.Message.success('已复制到剪贴板');
+      },
+      copyText: function (value) {
+        var ta = document.createElement('textarea'); ta.value = value; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); ELEMENT.Message.success('已复制');
       }
     }
   });

@@ -2,20 +2,18 @@ package com.aiopenplatform.service.impl;
 
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.aiopenplatform.dto.Result;
-import com.aiopenplatform.entity.TokenLedger;
 import com.aiopenplatform.entity.TokenOrder;
 import com.aiopenplatform.entity.TokenSku;
-import com.aiopenplatform.entity.UserQuota;
+import com.aiopenplatform.gateway.PlatformService;
 import com.aiopenplatform.mapper.TokenOrderMapper;
-import com.aiopenplatform.service.ITokenLedgerService;
 import com.aiopenplatform.service.ITokenOrderService;
 import com.aiopenplatform.service.ITokenSkuService;
-import com.aiopenplatform.service.IUserQuotaService;
 import com.aiopenplatform.utils.RedisIdWorker;
 import com.aiopenplatform.utils.UserHolder;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -52,13 +50,13 @@ public class TokenOrderServiceImpl extends ServiceImpl<TokenOrderMapper, TokenOr
     @Resource
     private ITokenSkuService tokenSkuService;
     @Resource
-    private ITokenLedgerService tokenLedgerService;
-    @Resource
-    private IUserQuotaService userQuotaService;
+    private PlatformService platformService;
     @Resource
     private RedisIdWorker redisIdWorker;
     @Resource
     private StringRedisTemplate stringRedisTemplate;
+    @Resource
+    private JdbcTemplate jdbcTemplate;
 
     private static final DefaultRedisScript<Long> GRANT_SCRIPT;
 
@@ -78,12 +76,19 @@ public class TokenOrderServiceImpl extends ServiceImpl<TokenOrderMapper, TokenOr
         // 校验 SKU 与活动时间窗（SKU 详情走四级缓存，热点读）
         TokenSku sku = tokenSkuService.getSkuWithCache(skuId);
         if (sku == null) {
-            return Result.fail("Token 包不存在");
+            return Result.fail("Credits 包不存在");
         }
         if (sku.getStatus() == null || sku.getStatus() != 1) {
-            return Result.fail("Token 包已下架");
+            return Result.fail("Credits 包已下架");
         }
         LocalDateTime now = LocalDateTime.now();
+        Integer active = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM tb_token_activity WHERE status=1 AND FIND_IN_SET(?,sku_ids)>0 "
+                        + "AND (start_time IS NULL OR start_time<=NOW()) AND (end_time IS NULL OR end_time>=NOW())",
+                Integer.class, skuId);
+        if (active == null || active == 0) {
+            return Result.fail("该 Credits 包当前不在有效活动中");
+        }
         if (sku.getBeginTime() != null && sku.getBeginTime().isAfter(now)) {
             return Result.fail("活动尚未开始");
         }
@@ -140,8 +145,8 @@ public class TokenOrderServiceImpl extends ServiceImpl<TokenOrderMapper, TokenOr
         int limit = sku.getLimitCount() == null || sku.getLimitCount() <= 0 ? 1 : sku.getLimitCount();
 
         // 2. DB 一人一份/限购校验（事实源）：与 Redis 预扣不一致时需回滚 Redis 恢复库存
-        Integer count = query().eq("user_id", userId).eq("sku_id", skuId).count();
-        if (count != null && count >= limit) {
+        long count = query().eq("user_id", userId).eq("sku_id", skuId).count();
+        if (count >= limit) {
             log.warn("用户已领取/已超限，回滚 Redis 预扣: userId={}, skuId={}", userId, skuId);
             return GrantResult.DUPLICATE_ALREADY_GRANTED;
         }
@@ -170,20 +175,10 @@ public class TokenOrderServiceImpl extends ServiceImpl<TokenOrderMapper, TokenOr
         order.setGrantTime(now);
         save(order);
 
-        // 5. 更新用户权益 + 写 token 账本（同一事务）
-        Long modelId = sku.getModelId() == null ? 0L : sku.getModelId();
-        userQuotaService.grantQuota(userId, modelId, sku.getTokenAmount());
-        UserQuota quota = userQuotaService.getQuotaFromDb(userId, modelId);
-        TokenLedger ledger = new TokenLedger();
-        ledger.setUserId(userId);
-        ledger.setOrderId(orderId);
-        ledger.setChangeType(1);
-        ledger.setChangeAmount(sku.getTokenAmount());
-        ledger.setBalanceAfter(quota == null ? 0L : quota.getBalance());
-        ledger.setCreateTime(now);
-        tokenLedgerService.save(ledger);
+        // 5. 发放到统一 Credits 账户并写账本（加入当前事务）
+        platformService.grantCredits(userId, sku.getTokenAmount(), String.valueOf(orderId), sku.getPackageName());
 
-        log.info("Token 发放成功: orderId={}, userId={}, skuId={}, amount={}",
+        log.info("Credits 发放成功: orderId={}, userId={}, skuId={}, amount={}",
                 orderId, userId, skuId, sku.getTokenAmount());
         return GrantResult.SUCCESS;
     }

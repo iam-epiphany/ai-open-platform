@@ -33,13 +33,11 @@ else
         redis.call('decr', countKey)
         return -3
     end
-    redis.call('expire', countKey, 604800)
 end
 
 -- 3. 预扣库存 + 记录已领取用户
 redis.call('incrby', stockKey, -1)
 redis.call('sadd', grantedKey, ARGV[2])
-redis.call('expire', grantedKey, 604800)
 
 -- 4. 写入 Redis Stream（与预扣同一原子操作，避免「预扣成功但消息丢失」）
 local ok, err = pcall(redis.call, 'XADD', streamKey, '*',

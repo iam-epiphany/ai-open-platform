@@ -5,16 +5,16 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>2.3.12.RELEASE</version>
+        <version>2.7.18</version>
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
     <groupId>com.aiopenplatform</groupId>
     <artifactId>ai-open-platform</artifactId>
     <version>0.0.1-SNAPSHOT</version>
     <name>ai-open-platform</name>
-    <description>AI 开放平台：Token 包高并发抢购 + 模型调用计费系统</description>
+    <description>高并发 Credits 抢购 + AI 模型调用消费系统</description>
     <properties>
-        <java.version>25</java.version>
+        <java.version>17</java.version>
     </properties>
 
     <!-- canal 官方 jar 未发布到中央仓库/镜像，以项目内 file:// 仓库形式自包含引入（libs/repo/） -->
@@ -28,26 +28,6 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-redis</artifactId>
-            <exclusions>
-                <exclusion>
-                    <artifactId>lettuce-core</artifactId>
-                    <groupId>io.lettuce</groupId>
-                </exclusion>
-                <exclusion>
-                    <artifactId>spring-data-redis</artifactId>
-                    <groupId>org.springframework.data</groupId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.data</groupId>
-            <artifactId>spring-data-redis</artifactId>
-            <version>2.6.2</version>
-        </dependency>
-        <dependency>
-            <artifactId>lettuce-core</artifactId>
-            <groupId>io.lettuce</groupId>
-            <version>6.1.6.RELEASE</version>
         </dependency>
         <dependency>
             <groupId>org.apache.commons</groupId>
@@ -78,15 +58,12 @@
         <dependency>
             <groupId>com.baomidou</groupId>
             <artifactId>mybatis-plus-boot-starter</artifactId>
-            <version>3.4.3</version>
+            <version>3.5.9</version>
         </dependency>
-        <!--JDK 17+ 兼容：MyBatis-Plus 3.4.3 默认传递 mybatis 3.5.7（自带 ognl 3.1.x，
-        在 JDK 17+ 静态初始化抛 ExceptionInInitializerError，JDK 25 必现），
-        显式覆盖为 mybatis 3.5.19（ognl 3.3.4，兼容 JDK 25）-->
         <dependency>
-            <groupId>org.mybatis</groupId>
-            <artifactId>mybatis</artifactId>
-            <version>3.5.19</version>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-jsqlparser</artifactId>
+            <version>3.5.9</version>
         </dependency>
         <!--hutool-->
         <dependency>
@@ -150,21 +127,19 @@
 
     <build>
         <plugins>
-            <!--JDK 23+ 默认不运行注解处理器，需显式开启 -proc:full，否则 Lombok 不生效-->
+            <!-- 统一生成 Java 17 字节码，避免新 JDK 与旧 Spring ASM 不兼容。 -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.13.0</version>
                 <configuration>
-                    <source>25</source>
-                    <target>25</target>
+                    <release>17</release>
                     <proc>full</proc>
                 </configuration>
             </plugin>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
-                <version>3.5.0</version>
                 <configuration>
                     <!-- MyBatis-Plus 3.4.x 的 Lambda 元数据解析在 JDK 17+ 需要模块开放。 -->
                     <jvmArguments>--add-opens java.base/java.lang=ALL-UNNAMED --add-opens java.base/java.lang.invoke=ALL-UNNAMED --add-opens java.base/java.util=ALL-UNNAMED</jvmArguments>
