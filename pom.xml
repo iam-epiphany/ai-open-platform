@@ -62,7 +62,7 @@
             <groupId>mysql</groupId>
             <artifactId>mysql-connector-java</artifactId>
             <scope>runtime</scope>
-            <version>5.1.47</version>
+            <version>8.0.28</version>
         </dependency>
         <dependency>
             <groupId>org.projectlombok</groupId>
@@ -92,7 +92,7 @@
         <dependency>
             <groupId>cn.hutool</groupId>
             <artifactId>hutool-all</artifactId>
-            <version>5.7.17</version>
+            <version>5.8.21</version>
         </dependency>
         <dependency>
             <groupId>org.aspectj</groupId>
@@ -102,7 +102,7 @@
         <dependency>
             <groupId>org.redisson</groupId>
             <artifactId>redisson</artifactId>
-            <version>3.13.6</version>
+            <version>3.22.0</version>
         </dependency>
         <!--caffeine 本地缓存，构建多级缓存 L1-->
         <dependency>
@@ -132,12 +132,12 @@
         <dependency>
             <groupId>com.google.protobuf</groupId>
             <artifactId>protobuf-java</artifactId>
-            <version>3.6.1</version>
+            <version>3.25.5</version>
         </dependency>
         <dependency>
             <groupId>com.alibaba</groupId>
             <artifactId>fastjson</artifactId>
-            <version>1.2.69</version>
+            <version>1.2.83</version>
         </dependency>
         <!-- canal.common 依赖 commons-lang（NestableRuntimeException 等） -->
         <dependency>
