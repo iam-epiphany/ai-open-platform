@@ -164,6 +164,7 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <version>3.5.0</version>
                 <configuration>
                     <!-- MyBatis-Plus 3.4.x 的 Lambda 元数据解析在 JDK 17+ 需要模块开放。 -->
                     <jvmArguments>--add-opens java.base/java.lang=ALL-UNNAMED --add-opens java.base/java.lang.invoke=ALL-UNNAMED --add-opens java.base/java.util=ALL-UNNAMED</jvmArguments>
