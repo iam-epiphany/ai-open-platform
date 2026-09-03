@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>模型调用 - AI 开放平台</title>
+  <title>消费测试 - AI 开放平台</title>
   <link rel="stylesheet" href="css/element.css">
   <link rel="stylesheet" href="css/token.css">
   <link rel="icon" href="favicon.ico">
@@ -15,13 +15,13 @@
       <a class="logo" href="index.html">⚡ AI 开放平台</a>
       <div class="topbar-right">
         <template v-if="logged">
-          <a class="link" href="index.html">控制台</a>
-          <a class="link active" href="playground.html">模型调用</a>
+          <a class="link" href="index.html">抢购大厅</a>
+          <a class="link" href="orders.html">领取记录</a>
+          <a class="link" href="billing.html">Credits 账本</a>
           <a class="link" href="apps.html">API 管理</a>
-          <a class="link" href="billing.html">账单</a>
-          <a class="link" href="orders.html?v=nav-keep">订单</a>
+          <a class="link active" href="playground.html">消费测试</a>
           <a class="link" href="me.html">个人中心</a>
-          <a class="link" v-if="isAdmin" href="admin.html">管理后台</a>
+          <a class="link" v-if="isAdmin" href="admin.html">运营后台</a>
           <span class="nick">{{ me.nickName }}</span>
           <el-button size="small" @click="logout">退出</el-button>
         </template>
@@ -33,7 +33,7 @@
   </header>
 
   <main class="container">
-    <h2 class="page-title">🤖 模型调用 Playground</h2>
+    <h2 class="page-title">🤖 Credits 消费测试</h2>
 
     <div class="chat-box">
       <el-form label-width="80px">
@@ -44,7 +44,7 @@
         </el-form-item>
         <el-form-item label="模型">
           <el-select v-model="model" placeholder="先加载可调用模型" style="width:280px;">
-            <el-option v-for="m in models" :key="m.id" :label="m.display_name || m.displayName || m.code" :value="m.code"></el-option>
+            <el-option v-for="m in models" :key="m.id" :label="m.display_name || m.id" :value="m.id"></el-option>
           </el-select>
         </el-form-item>
         <el-form-item label="提示词">
@@ -164,7 +164,7 @@
         if (!this.apiKey) return;
         api.openAiModels(this.apiKey).then(function (res) {
           self.models = res.data || [];
-          if (!self.model && self.models.length) self.model = self.models[0].code;
+          if (!self.model && self.models.length) self.model = self.models[0].id;
           sessionStorage.setItem('playgroundApiKey', self.apiKey);
         }).catch(showError);
       }

@@ -5,27 +5,23 @@ import com.aiopenplatform.dto.UserDTO;
 import com.aiopenplatform.gateway.ApiPrincipal;
 import com.aiopenplatform.gateway.ApiPrincipalHolder;
 import com.aiopenplatform.gateway.PlatformService;
-import com.aiopenplatform.service.ITokenApiKeyService;
 import org.springframework.web.servlet.HandlerInterceptor;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
 /**
- * AI 开放接口双通道鉴权（仅拦截 /ai/**，LoginInterceptor 已放行该路径）：
+ * OpenAI-compatible 网关鉴权：
  * <ul>
- *     <li>请求头带 X-Api-Key：按哈希解析用户（Redis 缓存 + DB 回填），写入 UserHolder；</li>
- *     <li>无 API Key：依赖登录态（RefreshTokenInterceptor 已填充 UserHolder）；</li>
- *     <li>两者都没有 → 401。</li>
+ *     <li>从 X-Api-Key 或 Authorization: Bearer 读取密钥，按 SHA-256 哈希在 DB 鉴权。</li>
+ *     <li>仅接受应用中生成的 tok_ 密钥，普通登录 token 不能替代。</li>
  * </ul>
  */
 public class ApiKeyInterceptor implements HandlerInterceptor {
 
-    private final ITokenApiKeyService apiKeyService;
     private final PlatformService platformService;
 
-    public ApiKeyInterceptor(ITokenApiKeyService apiKeyService, PlatformService platformService) {
-        this.apiKeyService = apiKeyService;
+    public ApiKeyInterceptor(PlatformService platformService) {
         this.platformService = platformService;
     }
 
@@ -47,23 +43,16 @@ public class ApiKeyInterceptor implements HandlerInterceptor {
                 ApiPrincipalHolder.set(principal);
                 return true;
             }
-            Long userId = apiKeyService.resolveUserId(apiKey);
-            if (userId == null) {
-                response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-                return false;
-            }
-            UserDTO user = new UserDTO();
-            user.setId(userId);
-            UserHolder.saveUser(user);
-            return true;
+            writeUnauthorized(response);
+            return false;
         }
         // 无 API Key：走登录态；未登录返回 401
         if (UserHolder.getUser() == null) {
-            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+            writeUnauthorized(response);
             return false;
         }
         if (request.getRequestURI().startsWith(request.getContextPath() + "/v1/")) {
-            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+            writeUnauthorized(response);
             return false;
         }
         return true;
@@ -72,5 +61,12 @@ public class ApiKeyInterceptor implements HandlerInterceptor {
     @Override
     public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) {
         ApiPrincipalHolder.clear();
+    }
+
+    private void writeUnauthorized(HttpServletResponse response) throws Exception {
+        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+        response.setCharacterEncoding("UTF-8");
+        response.setContentType("application/json;charset=UTF-8");
+        response.getWriter().write("{\"error\":{\"type\":\"authentication_error\",\"message\":\"缺少或无效的 API Key\"}}");
     }
 }

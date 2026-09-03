@@ -24,6 +24,9 @@ public class RefreshTokenInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
+        // Tomcat worker threads are reused. Always clear a possible identity left by
+        // an interrupted/abnormal previous request before resolving this request.
+        UserHolder.removeUser();
         //获取请求头中的token
         String token = request.getHeader("Authorization");
         if(StrUtil.isBlank(token)){
@@ -47,6 +50,6 @@ public class RefreshTokenInterceptor implements HandlerInterceptor {
 
     @Override
     public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) throws Exception {
-        HandlerInterceptor.super.afterCompletion(request, response, handler, ex);
+        UserHolder.removeUser();
     }
 }

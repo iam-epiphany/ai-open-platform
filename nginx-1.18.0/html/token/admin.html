@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>管理后台 - AI 开放平台</title>
+  <title>运营后台 - AI 开放平台</title>
   <link rel="stylesheet" href="css/element.css">
   <link rel="stylesheet" href="css/token.css">
   <link rel="icon" href="favicon.ico">
@@ -15,13 +15,13 @@
       <a class="logo" href="index.html">⚡ AI 开放平台</a>
       <div class="topbar-right">
         <template v-if="logged">
-          <a class="link" href="index.html">控制台</a>
-          <a class="link" href="playground.html">模型调用</a>
+          <a class="link" href="index.html">抢购大厅</a>
+          <a class="link" href="orders.html">领取记录</a>
+          <a class="link" href="billing.html">Credits 账本</a>
           <a class="link" href="apps.html">API 管理</a>
-          <a class="link" href="billing.html">账单</a>
-          <a class="link" href="orders.html?v=nav-keep">订单</a>
+          <a class="link" href="playground.html">消费测试</a>
           <a class="link" href="me.html">个人中心</a>
-          <a class="link active" href="admin.html">管理后台</a>
+          <a class="link active" href="admin.html">运营后台</a>
           <span class="nick">{{ me.nickName }}</span>
           <el-button size="small" @click="logout">退出</el-button>
         </template>
@@ -33,7 +33,7 @@
   </header>
 
   <main class="container" v-loading="loading">
-    <h2 class="page-title">🛠 管理后台</h2>
+    <h2 class="page-title">🛠 Credits 抢购运营后台</h2>
 
     <!-- 平台总览 -->
     <div class="stat-grid">
@@ -55,17 +55,22 @@
       </div>
     </div>
 
+    <!-- 活动管理 -->
+    <div class="panel" style="margin-bottom:20px;">
+      <div class="panel-title" style="display:flex;justify-content:space-between;align-items:center;"><span>📣 限量活动管理</span><el-button size="mini" type="primary" @click="openActivityForm()">新增活动</el-button></div>
+      <el-table :data="activities" size="mini" style="width:100%"><el-table-column prop="id" label="ID" width="60"></el-table-column><el-table-column prop="title" label="活动名称"></el-table-column><el-table-column prop="skuIds" label="Credits 包 ID" width="150"></el-table-column><el-table-column label="开始时间" width="160"><template slot-scope="s">{{ formatTime(s.row.startTime) }}</template></el-table-column><el-table-column label="结束时间" width="160"><template slot-scope="s">{{ formatTime(s.row.endTime) }}</template></el-table-column><el-table-column label="状态" width="80"><template slot-scope="s"><el-tag size="mini" :type="s.row.status===1?'success':'info'">{{ s.row.status===1?'启用':'停用' }}</el-tag></template></el-table-column><el-table-column label="操作" width="80"><template slot-scope="s"><el-button size="mini" type="text" @click="openActivityForm(s.row)">编辑</el-button></template></el-table-column></el-table>
+    </div>
+
     <!-- SKU 管理 -->
     <div class="panel" style="margin-bottom:20px;">
       <div class="panel-title" style="display:flex;justify-content:space-between;align-items:center;">
-        <span>🎁 Token 包（SKU）管理</span>
-        <el-button size="mini" type="primary" @click="openSkuForm()">新增 Token 包</el-button>
+        <span>🎁 Credits 包（SKU）管理</span>
+        <el-button size="mini" type="primary" @click="openSkuForm()">新增 Credits 包</el-button>
       </div>
       <el-table :data="skus" size="mini" style="width:100%">
         <el-table-column prop="id" label="ID" width="60"></el-table-column>
-        <el-table-column prop="modelName" label="模型" width="120"></el-table-column>
-        <el-table-column prop="packageName" label="Token 包名称" min-width="200"></el-table-column>
-        <el-table-column label="Token 量" width="110">
+        <el-table-column prop="packageName" label="Credits 包名称" min-width="200"></el-table-column>
+        <el-table-column label="Credits 数量" width="130">
           <template slot-scope="scope">{{ formatTokens(scope.row.tokenAmount) }}</template>
         </el-table-column>
         <el-table-column label="类型" width="100">
@@ -128,16 +133,13 @@
 
     <!-- 额度调整 -->
     <div class="panel">
-      <div class="panel-title">💱 用户额度调整（写账本 = 操作审计）</div>
+      <div class="panel-title">💱 用户 Credits 调整（写账本 = 操作审计）</div>
       <el-form inline label-width="90px">
         <el-form-item label="用户 ID">
           <el-input v-model.number="quotaForm.userId" placeholder="用户 id" style="width:120px;"></el-input>
         </el-form-item>
-        <el-form-item label="模型 ID">
-          <el-input v-model.number="quotaForm.modelId" placeholder="0=通用池" style="width:120px;"></el-input>
-        </el-form-item>
-        <el-form-item label="额度">
-          <el-input v-model.number="quotaForm.amount" placeholder="Token 数量" style="width:130px;"></el-input>
+        <el-form-item label="Credits">
+          <el-input v-model.number="quotaForm.amount" placeholder="Credits 数量" style="width:150px;"></el-input>
         </el-form-item>
         <el-form-item label="操作">
           <el-radio-group v-model="quotaForm.type">
@@ -152,18 +154,12 @@
     </div>
 
     <!-- SKU 编辑弹窗 -->
-    <el-dialog :title="skuForm.id ? '编辑 Token 包' : '新增 Token 包'" :visible.sync="skuDialog" width="520px">
+    <el-dialog :title="skuForm.id ? '编辑 Credits 包' : '新增 Credits 包'" :visible.sync="skuDialog" width="520px">
       <el-form label-width="110px" size="small">
-        <el-form-item label="模型名称">
-          <el-input v-model.trim="skuForm.modelName" placeholder="如 deepseek-r1"></el-input>
-        </el-form-item>
-        <el-form-item label="模型 ID">
-          <el-input v-model.number="skuForm.modelId" placeholder="0=通用池"></el-input>
-        </el-form-item>
         <el-form-item label="包名称">
-          <el-input v-model.trim="skuForm.packageName" placeholder="如 10万 Tokens 免费体验包"></el-input>
+          <el-input v-model.trim="skuForm.packageName" placeholder="如 10万 Credits 限量包"></el-input>
         </el-form-item>
-        <el-form-item label="Token 额度">
+        <el-form-item label="Credits 数量">
           <el-input v-model.number="skuForm.tokenAmount" placeholder="如 100000"></el-input>
         </el-form-item>
         <el-form-item label="类型">
@@ -190,6 +186,7 @@
         <el-button size="small" type="primary" :loading="savingSku" @click="saveSku">保存</el-button>
       </span>
     </el-dialog>
+    <el-dialog :title="activityForm.id?'编辑活动':'新增活动'" :visible.sync="activityDialog" width="560px"><el-form label-width="100px" size="small"><el-form-item label="活动名称"><el-input v-model.trim="activityForm.title"></el-input></el-form-item><el-form-item label="Credits 包 ID"><el-input v-model.trim="activityForm.skuIds" placeholder="多个 ID 用英文逗号分隔，如 1,2"></el-input></el-form-item><el-form-item label="活动时间"><el-date-picker v-model="activityRange" type="datetimerange" value-format="yyyy-MM-dd'T'HH:mm:ss" range-separator="至" start-placeholder="开始" end-placeholder="结束" style="width:100%"></el-date-picker></el-form-item><el-form-item label="状态"><el-radio-group v-model="activityForm.status"><el-radio :label="1">启用</el-radio><el-radio :label="0">停用</el-radio></el-radio-group></el-form-item></el-form><span slot="footer"><el-button size="small" @click="activityDialog=false">取消</el-button><el-button size="small" type="primary" :loading="savingActivity" @click="saveActivity">保存</el-button></span></el-dialog>
   </main>
 </div>
 
@@ -208,6 +205,7 @@
         loading: false,
         overview: {},
         skus: [],
+        activities: [], activityDialog: false, savingActivity: false, activityForm: {}, activityRange: [],
         skuDialog: false,
         savingSku: false,
         skuForm: {},
@@ -215,7 +213,7 @@
         callLogTotal: 0,
         logCurrent: 1,
         adjusting: false,
-        quotaForm: { userId: null, modelId: 0, amount: null, type: 1 }
+        quotaForm: { userId: null, amount: null, type: 1 }
       };
     },
     created: function () {
@@ -225,11 +223,12 @@
       load: function () {
         var self = this;
         this.loading = true;
-        Promise.all([api.adminCreditOverview(), api.adminSkus(), api.adminAiCallLogs(1, 10)]).then(function (results) {
+        Promise.all([api.adminCreditOverview(), api.adminSkus(), api.adminActivities(), api.adminAiCallLogs(1, 10)]).then(function (results) {
           self.overview = results[0].data || {};
           self.skus = results[1].data || [];
-          self.callLogs = (results[2].data) || [];
-          self.callLogTotal = results[2].total || 0;
+          self.activities = results[2].data || [];
+          self.callLogs = (results[3].data) || [];
+          self.callLogTotal = results[3].total || 0;
         }).catch(showError).then(function () {
           self.loading = false;
         });
@@ -252,7 +251,7 @@
         var self = this;
         var body = JSON.parse(JSON.stringify(this.skuForm));
         this.savingSku = true;
-        var req = body.id ? http.put('/api/token-sku', body) : http.post('/api/token-sku', body);
+        var req = body.id ? api.adminUpdateSku(body) : api.adminCreateSku(body);
         req.then(function () {
           ELEMENT.Message.success('已保存');
           self.skuDialog = false;
@@ -265,7 +264,7 @@
         var self = this;
         var body = JSON.parse(JSON.stringify(sku));
         body.status = sku.status === 1 ? 0 : 1;
-        http.put('/api/token-sku', body).then(function () {
+        api.adminUpdateSku(body).then(function () {
           ELEMENT.Message.success(body.status === 1 ? '已上架' : '已下架');
           self.load();
         }).catch(showError);
@@ -277,13 +276,23 @@
           return;
         }
         this.adjusting = true;
-        api.adminAdjustQuota(this.quotaForm.userId, this.quotaForm.modelId, this.quotaForm.amount, this.quotaForm.type)
+        api.adminAdjustQuota(this.quotaForm.userId, this.quotaForm.amount, this.quotaForm.type)
           .then(function () {
             ELEMENT.Message.success('已执行，账本已记录');
             self.load();
           }).catch(showError).then(function () {
             self.adjusting = false;
           });
+      },
+      openActivityForm: function (activity) {
+        this.activityForm = activity ? JSON.parse(JSON.stringify(activity)) : { title: '', skuIds: '', status: 1 };
+        this.activityRange = activity ? [String(activity.startTime).replace('T',' '), String(activity.endTime).replace('T',' ')] : [];
+        this.activityDialog = true;
+      },
+      saveActivity: function () {
+        if (!this.activityForm.title || !this.activityForm.skuIds || this.activityRange.length !== 2) { ELEMENT.Message.warning('请填写完整活动信息'); return; }
+        var self=this, body=JSON.parse(JSON.stringify(this.activityForm)); body.startTime=this.activityRange[0]; body.endTime=this.activityRange[1]; this.savingActivity=true;
+        (body.id ? api.adminUpdateActivity(body) : api.adminCreateActivity(body)).then(function(){ ELEMENT.Message.success('活动已保存'); self.activityDialog=false; self.load(); }).catch(showError).then(function(){ self.savingActivity=false; });
       }
     },
     computed: {

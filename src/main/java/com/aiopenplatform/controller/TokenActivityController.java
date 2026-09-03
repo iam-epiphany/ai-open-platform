@@ -16,7 +16,7 @@ import javax.annotation.Resource;
  * </p>
  */
 @RestController
-@RequestMapping("/token-activity")
+@RequestMapping({"/credit-activities", "/token-activity"})
 public class TokenActivityController {
 
     @Resource

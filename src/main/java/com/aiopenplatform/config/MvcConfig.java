@@ -1,7 +1,6 @@
 package com.aiopenplatform.config;
 
 import com.aiopenplatform.cache.ScopeCacheInterceptor;
-import com.aiopenplatform.service.ITokenApiKeyService;
 import com.aiopenplatform.gateway.PlatformService;
 import com.aiopenplatform.utils.ApiKeyInterceptor;
 import com.aiopenplatform.utils.BlackListInterceptor;
@@ -30,9 +29,6 @@ public class MvcConfig implements WebMvcConfigurer {
 
     @Autowired
     private ScopeCacheInterceptor scopeCacheInterceptor;
-
-    @Autowired
-    private ITokenApiKeyService apiKeyService;
 
     @Autowired
     private PlatformService platformService;
@@ -65,14 +61,14 @@ public class MvcConfig implements WebMvcConfigurer {
                         "/upload/**",
                         "/token-sku/**",
                         "/token-activity/**",
-                        "/ai/**",
+                        "/credit-packages/**",
+                        "/credit-activities/**",
                         "/v1/**",
                         "/imgs/**"
                 ).order(3);
-        //5.AI 开放接口鉴权拦截器：/ai/** 双通道（登录态或 X-Api-Key）；模型目录公开放行
-        registry.addInterceptor(new ApiKeyInterceptor(apiKeyService, platformService))
-                .addPathPatterns("/ai/**", "/v1/**")
-                .excludePathPatterns("/ai/models")
+        //5.对外 OpenAI-compatible 网关只接受 App API Key。
+        registry.addInterceptor(new ApiKeyInterceptor(platformService))
+                .addPathPatterns("/v1/**")
                 .order(4);
     }
 }

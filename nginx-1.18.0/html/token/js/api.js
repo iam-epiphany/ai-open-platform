@@ -16,50 +16,46 @@ var api = {
     me: function () {
         return http.get('/user/me');
     },
+    logout: function () {
+        return http.post('/user/logout');
+    },
 
     // ===== 活动 =====
     listActivities: function () {
-        return http.get('/token-activity/list');
+        return http.get('/credit-activities/list');
     },
     getActivity: function (id) {
-        return http.get('/token-activity/' + id);
+        return http.get('/credit-activities/' + id);
     },
 
     // ===== 抢购 =====
     grant: function (skuId) {
-        return http.post('/token-order/grant/' + skuId);
+        return http.post('/credit-orders/claim/' + skuId);
     },
 
     // ===== 订单 / 权益 =====
     myOrders: function () {
-        return http.get('/token-order/user');
-    },
-    myQuota: function (modelId) {
-        var params = modelId ? { modelId: modelId } : {};
-        return http.get('/user-quota/me', { params: params });
+        return http.get('/credit-orders/user');
     },
 
     // ===== Credits =====
     creditAccount: function () {
         return http.get('/credits/account');
     },
-    rechargeCredits: function (credits) {
-        return http.post('/credits/recharge', { credits: credits });
+    creditSummary: function () {
+        return http.get('/credits/summary');
     },
-    listCreditActivities: function () {
-        return http.get('/credit-activities');
+    creditRecords: function (type, current, size) {
+        return http.get('/credits/records', { params: { type: type || '', current: current || 1, size: size || 10 } });
     },
-    claimCreditPackage: function (packageId) {
-        return http.post('/credit-activities/packages/' + packageId + '/claim');
+    creditDaily: function (days) {
+        return http.get('/credits/daily', { params: { days: days || 7 } });
+    },
+    purchaseCredits: function (credits) {
+        return http.post('/credits/purchase', { credits: credits });
     },
 
     // ===== AI 开放平台 =====
-    listModels: function () {
-        return http.get('/ai/models');
-    },
-    chat: function (data) {
-        return http.post('/ai/chat', data);
-    },
     openAiModels: function (apiKey) {
         return http.get('/v1/models', { headers: { 'X-Api-Key': apiKey } });
     },
@@ -81,17 +77,6 @@ var api = {
     deleteApp: function (appId) {
         return http.delete('/apps/' + appId);
     },
-    billingSummary: function () {
-        return http.get('/billing/summary');
-    },
-    billingRecords: function (changeType, current, size) {
-        return http.get('/billing/records', {
-            params: { changeType: changeType || '', current: current || 1, size: size || 10 }
-        });
-    },
-    billingDaily: function (days) {
-        return http.get('/billing/daily', { params: { days: days || 7 } });
-    },
     adminCheck: function () {
         return http.get('/admin/check');
     },
@@ -102,10 +87,25 @@ var api = {
         return http.get('/admin/call-logs', { params: { current: current || 1, size: size || 10 } });
     },
     adminSkus: function () {
-        return http.get('/admin/skus');
+        return http.get('/admin/credit-packages');
     },
-    adminAdjustQuota: function (userId, modelId, amount, type) {
-        return http.put('/admin/quota', { userId: userId, modelId: modelId, amount: amount, type: type });
+    adminCreateSku: function (sku) {
+        return http.post('/admin/credit-packages', sku);
+    },
+    adminUpdateSku: function (sku) {
+        return http.put('/admin/credit-packages', sku);
+    },
+    adminActivities: function () {
+        return http.get('/admin/credit-activities');
+    },
+    adminCreateActivity: function (activity) {
+        return http.post('/admin/credit-activities', activity);
+    },
+    adminUpdateActivity: function (activity) {
+        return http.put('/admin/credit-activities', activity);
+    },
+    adminAdjustQuota: function (userId, amount, type) {
+        return http.put('/admin/credits', { userId: userId, amount: amount, type: type });
     },
     adminCreditOverview: function () {
         return http.get('/admin/credit-overview');

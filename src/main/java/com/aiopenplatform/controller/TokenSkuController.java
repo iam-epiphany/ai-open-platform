@@ -4,7 +4,10 @@ package com.aiopenplatform.controller;
 import com.aiopenplatform.dto.Result;
 import com.aiopenplatform.entity.TokenSku;
 import com.aiopenplatform.service.ITokenSkuService;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
 import javax.annotation.Resource;
 
@@ -14,30 +17,11 @@ import javax.annotation.Resource;
  * </p>
  */
 @RestController
-@RequestMapping("/token-sku")
+@RequestMapping({"/credit-packages", "/token-sku"})
 public class TokenSkuController {
 
     @Resource
     private ITokenSkuService tokenSkuService;
-
-    /**
-     * 管理端：新增 Token 包（拉新体验包 / 模型试用包 / 企业团队共享池）
-     * 入库后预热 Redis 预扣库存，缓存同步由 binlog（Canal）驱动
-     */
-    @PostMapping
-    public Result addSku(@RequestBody TokenSku sku) {
-        tokenSkuService.createSku(sku);
-        return Result.ok(sku.getId());
-    }
-
-    /**
-     * 管理端：更新 SKU（业务代码只写 MySQL，缓存同步交给 binlog）
-     */
-    @PutMapping
-    public Result updateSku(@RequestBody TokenSku sku) {
-        tokenSkuService.updateSku(sku);
-        return Result.ok();
-    }
 
     /**
      * SKU 详情（四级缓存热点读：ScopeCaching -&gt; Caffeine -&gt; Redis -&gt; MySQL）

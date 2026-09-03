@@ -1,0 +1,5 @@
+token,clientIp
+# 将下面两列替换为真实的独立登录 token 与测试用客户端 IP；一行只给一个并发用户使用。
+# 登录 token 不能包含逗号。clientIp 仅用于测试环境模拟不同来源，生产反向代理应覆盖而非信任客户端传入的 X-Forwarded-For。
+your-login-token-1,10.20.0.1
+your-login-token-2,10.20.0.2

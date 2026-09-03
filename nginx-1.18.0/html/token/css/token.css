@@ -1,6 +1,10 @@
 /* AI 开放平台前端样式 */
 [v-cloak] { display: none; }
 * { box-sizing: border-box; }
+html {
+  /* 保留垂直滚动条占位，切换不同高度的页面时主内容不会横向跳动。 */
+  overflow-y: scroll;
+}
 body {
   margin: 0;
   min-height: 100vh;
@@ -39,7 +43,7 @@ body {
   text-decoration: none;
   letter-spacing: -.2px;
 }
-.topbar-right { display: flex; flex: 1; flex-direction: column; align-items: stretch; width: 100%; gap: 4px; }
+.topbar-right { display: flex; flex: 1; flex-direction: column; align-items: stretch; width: 100%; gap: 4px; min-height: 0; }
 .nick { margin: auto 12px 4px; color: #cbd5e1; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .link {
   position: relative;
@@ -50,10 +54,12 @@ body {
   text-decoration: none;
   font-size: 14px;
   font-weight: 500;
+  line-height: 20px;
+  min-height: 40px;
   transition: background .18s ease, color .18s ease;
 }
 .link:hover, .link:focus { color: #f8fafc; background: rgba(255,255,255,.065); outline: none; }
-.link.active { color: #fff; font-weight: 650; background: #1d3b68; box-shadow: inset 3px 0 0 #65a8ff; }
+.link.active { color: #fff; background: #1d3b68; box-shadow: inset 3px 0 0 #65a8ff; }
 .topbar .el-button { width: 100%; margin: 0; border-radius: 7px; }
 
 /* ===== 布局 ===== */
@@ -243,6 +249,29 @@ body {
 /* 管理后台概览 */
 .mono { font-family: Consolas, Monaco, monospace; }
 
+/* 高并发 Credits 大厅：用“运行状态带”表达业务链路，而不是装饰性 Banner。 */
+.rush-hero {
+  display: flex; justify-content: space-between; align-items: stretch; gap: 28px;
+  padding: 28px 30px; margin-bottom: 14px; color: #fff; border-radius: 14px;
+  background: linear-gradient(118deg, #12325b 0%, #194f86 64%, #2563eb 100%);
+  box-shadow: 0 16px 36px rgba(18, 50, 91, .18);
+}
+.rush-eyebrow { font: 700 11px/1.4 Consolas, Monaco, monospace; letter-spacing: .14em; color: #a9c8f5; }
+.rush-hero h1 { margin: 8px 0 8px; font-size: 27px; letter-spacing: -.02em; }
+.rush-hero p { margin: 0; color: #dce9fa; font-size: 14px; }
+.rush-balance { min-width: 190px; padding: 16px 20px; border-left: 1px solid rgba(255,255,255,.22); display: flex; flex-direction: column; }
+.rush-balance span, .rush-balance small { color: #dce9fa; }
+.rush-balance strong { font: 700 34px/1.25 Consolas, Monaco, monospace; margin: 4px 0; }
+.flow-strip { display: flex; align-items: center; justify-content: center; gap: 12px; margin: 0 0 20px; padding: 11px 16px; border: 1px solid #dce6f2; background: #f8fbff; border-radius: 10px; font-size: 12px; color: #516579; }
+.flow-strip b { color: #2563eb; font-family: Consolas, Monaco, monospace; margin-right: 5px; }
+.flow-strip i { color: #9bb0c5; font-style: normal; }
+.rush-title { display: flex; align-items: center; justify-content: space-between; }
+.rush-title a { font-size: 13px; color: #2563eb; font-weight: 500; }
+.live-dot { display: inline-block; width: 8px; height: 8px; margin-right: 8px; border-radius: 50%; background: #16a34a; box-shadow: 0 0 0 5px rgba(22,163,74,.12); }
+.consume-exit { margin-top: 20px; display: flex; justify-content: space-between; align-items: center; gap: 24px; }
+.consume-exit p { margin: 0; color: #667085; font-size: 13px; line-height: 1.7; }
+.consume-exit code { color: #12325b; font-family: Consolas, Monaco, monospace; }
+
 /* 登录页不继承工作台侧栏的留白。 */
 .login-page { position: fixed; inset: 0; z-index: 30; }
 
@@ -256,4 +285,8 @@ body {
   .nick { margin: 0 4px 0 auto; min-width: max-content; }
   .topbar .el-button { width: auto; flex: 0 0 auto; }
   .container { padding: 24px 16px 36px; }
+  .rush-hero, .consume-exit { flex-direction: column; }
+  .rush-balance { border-left: 0; border-top: 1px solid rgba(255,255,255,.22); padding-left: 0; }
+  .flow-strip { justify-content: flex-start; overflow-x: auto; }
+  .flow-strip span { white-space: nowrap; }
 }

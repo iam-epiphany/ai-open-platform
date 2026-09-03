@@ -1,148 +1,75 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AI 开放平台 - 控制台</title>
-  <link rel="stylesheet" href="css/element.css">
-  <link rel="stylesheet" href="css/token.css">
-  <link rel="icon" href="favicon.ico">
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>Credits 抢购大厅 - AI 开放平台</title>
+  <link rel="stylesheet" href="css/element.css"><link rel="stylesheet" href="css/token.css"><link rel="icon" href="favicon.ico">
 </head>
-<body>
-<div id="app" v-cloak>
-  <header class="topbar">
-    <div class="topbar-inner">
-      <a class="logo" href="index.html">⚡ AI 开放平台</a>
-      <div class="topbar-right">
-        <template v-if="logged">
-          <a class="link active" href="index.html">控制台</a>
-          <a class="link" href="playground.html">模型调用</a>
-          <a class="link" href="apps.html">API 管理</a>
-          <a class="link" href="billing.html">账单</a>
-          <a class="link" href="orders.html?v=nav-keep">订单</a>
-          <a class="link" href="me.html">个人中心</a>
-          <a class="link" v-if="isAdmin" href="admin.html">管理后台</a>
-          <span class="nick">{{ me.nickName }}</span>
-          <el-button size="small" @click="logout">退出</el-button>
-        </template>
-        <template v-else>
-          <el-button size="small" type="primary" @click="goLogin">登录 / 注册</el-button>
-        </template>
-      </div>
-    </div>
-  </header>
+<body><div id="app" v-cloak>
+  <header class="topbar"><div class="topbar-inner">
+    <a class="logo" href="index.html">⚡ Credits Hub</a>
+    <div class="topbar-right"><template v-if="logged">
+      <a class="link active" href="index.html">抢购大厅</a><a class="link" href="orders.html">领取记录</a>
+      <a class="link" href="billing.html">Credits 账本</a><a class="link" href="apps.html">API 管理</a>
+      <a class="link" href="playground.html">消费测试</a><a class="link" href="me.html">个人中心</a>
+      <a class="link" v-if="isAdmin" href="admin.html">运营后台</a><span class="nick">{{ me.nickName }}</span>
+      <el-button size="small" @click="logout">退出</el-button>
+    </template><template v-else><el-button size="small" type="primary" @click="goLogin">登录 / 注册</el-button></template></div>
+  </div></header>
 
   <main class="container" v-loading="loading">
-    <h2 class="page-title">👋 控制台</h2>
+    <section class="rush-hero">
+      <div><div class="rush-eyebrow">HIGH-CONCURRENCY CREDIT DISTRIBUTION</div>
+        <h1>限量 Credits，抢到即可调用真实模型</h1>
+        <p>库存原子预扣，领取请求异步发放。成功到账后可通过平台 API Key 消费。</p>
+      </div>
+      <div class="rush-balance"><span>可用余额</span><strong>{{ formatTokens(account.balance) }}</strong>
+        <small>Credits · 冻结 {{ formatTokens(account.frozenBalance) }}</small></div>
+    </section>
 
-    <!-- Credits 账户 -->
-    <div class="stat-grid">
-      <div class="stat-card">
-        <div class="label">可用 Credits</div>
-        <div class="value">{{ formatTokens(account.balance) }}<span class="unit">Credits</span></div>
-        <div style="font-size:12px;color:#909399;margin-top:4px;">冻结中 {{ formatTokens(account.frozenBalance) }} Credits</div>
-      </div>
-      <div class="stat-card">
-        <div class="label">调用方式</div>
-        <div class="value" style="font-size:18px;">OpenAI Compatible</div>
-        <div style="font-size:12px;color:#909399;margin-top:7px;">使用 App API Key 调用平台模型</div>
-      </div>
-      <div class="stat-card">
-        <div class="label">快速操作</div>
-        <div style="margin-top:11px;"><el-button type="primary" size="small" @click="goBilling">充值 Credits</el-button></div>
-      </div>
-    </div>
+    <section class="flow-strip" aria-label="Credits 发放链路">
+      <span><b>01</b> 原子校验库存</span><i>→</i><span><b>02</b> 请求进入队列</span><i>→</i>
+      <span><b>03</b> 异步发放入账</span><i>→</i><span><b>04</b> API 调用消费</span>
+    </section>
 
-    <!-- 模型调用 -->
-    <div class="panel" style="margin-bottom:20px;">
-      <div class="panel-title">🤖 模型调用</div>
-      <div class="model-grid">
-        <div class="model-card">
-          <div class="model-name">deepseek-chat</div>
-          <div class="model-desc">真实 Provider 调用，按输入与输出 Token 折算 Credits</div>
-          <el-button type="primary" size="small" round @click="goPlayground">打开 Playground</el-button>
-        </div>
-      </div>
-    </div>
+    <section class="panel rush-panel">
+      <div class="panel-title rush-title"><div><span class="live-dot"></span>正在进行的 Credits 活动</div><a href="orders.html">查看领取记录</a></div>
+      <article class="activity-card" v-for="act in activities" :key="act.activity.id">
+        <div class="activity-head"><div><h3 class="activity-title">{{ creditName(act.activity.title) }}</h3>
+          <p class="activity-time">{{ formatTime(act.activity.startTime) }} 至 {{ formatTime(act.activity.endTime) }}</p></div>
+          <el-tag :type="statusType(act)" size="small">{{ statusText(act) }}</el-tag></div>
+        <div class="sku-grid"><div class="sku-card" v-for="sku in act.skus" :key="sku.id">
+          <div class="sku-model">{{ sku.modelName || '全模型通用' }}</div><div class="sku-name">{{ creditName(sku.packageName) }}</div>
+          <div class="sku-tokens">{{ formatTokens(sku.tokenAmount) }}<span class="unit">Credits</span></div>
+          <div class="sku-meta"><el-tag size="mini" :type="sku.type === 1 ? 'success' : 'warning'">
+            {{ sku.type === 1 ? '每人限领 1 份' : '每人限领 ' + sku.limitCount + ' 份' }}</el-tag>
+            <span class="stock" :class="{ zero: sku.stock <= 0 }">库存 {{ sku.stock }}</span></div>
+          <el-button type="warning" size="small" round :disabled="statusText(act) !== '进行中' || sku.stock <= 0" @click="goDetail(act.activity.id)">立即抢购</el-button>
+        </div></div>
+      </article>
+      <el-empty v-if="!loading && activities.length === 0" description="当前没有进行中的 Credits 活动"></el-empty>
+    </section>
 
-    <!-- 限时活动 -->
-    <div class="panel">
-      <div class="panel-title" style="display:flex;justify-content:space-between;align-items:center;">
-        <span>🎁 Credits 限时活动</span>
-        <el-button size="mini" type="text" @click="goBilling">查看账户</el-button>
-      </div>
-      <div class="activity-card" style="box-shadow:none;padding:0 0 4px;" v-for="act in activities" :key="act.package_id">
-        <div class="activity-head">
-          <div>
-            <h3 class="activity-title">{{ act.title }}</h3>
-            <p class="activity-time">{{ formatTime(act.begin_time) }} ~ {{ formatTime(act.end_time) }}</p>
-          </div>
-          <el-tag type="success" size="small">进行中</el-tag>
-        </div>
-        <div class="sku-grid">
-          <div class="sku-card">
-            <div class="sku-model">新人体验</div>
-            <div class="sku-name">{{ act.package_name }}</div>
-            <div class="sku-tokens">{{ formatTokens(act.credit_amount) }}<span class="unit">Credits</span></div>
-            <div class="sku-meta">
-              <el-tag size="mini" type="success">每人限领 {{ act.limit_count }} 份</el-tag>
-              <span class="stock" :class="{ zero: act.stock <= 0 }">剩余 {{ act.stock }} 份</span>
-            </div>
-            <el-button type="warning" size="small" round :disabled="act.stock <= 0" @click="claim(act)">领取 Credits</el-button>
-          </div>
-        </div>
-      </div>
-      <el-empty v-if="!loading && activities.length === 0" description="暂无进行中的活动"></el-empty>
-    </div>
+    <section class="panel consume-exit"><div><div class="panel-title">Credits 如何使用</div>
+      <p>创建应用并领取 <code>tok_</code> API Key，通过 OpenAI Chat Completions 协议调用 DeepSeek；系统按真实 usage 结算 Credits。</p></div>
+      <div><el-button @click="goPage('apps.html')">创建 API Key</el-button>
+        <el-button type="primary" @click="goPage('playground.html')">测试模型调用</el-button></div></section>
   </main>
 </div>
-
-<script src="js/vue.js"></script>
-<script src="js/element.js"></script>
-<script src="js/axios.min.js"></script>
-<script src="js/common.js"></script>
-<script src="js/api.js"></script>
+<script src="js/vue.js"></script><script src="js/element.js"></script><script src="js/axios.min.js"></script>
+<script src="js/common.js"></script><script src="js/api.js"></script>
 <script>
-  Vue.use(ELEMENT);
-  new Vue({
-    el: '#app',
-    mixins: [topbarMixin],
-    data: function () {
-      return {
-        loading: false,
-        account: { balance: 0, frozenBalance: 0 },
-        activities: []
-      };
-    },
-    created: function () {
-      this.load();
-    },
-    methods: {
-      load: function () {
-        var self = this;
-        this.loading = true;
-        Promise.all([api.creditAccount(), api.listCreditActivities()]).then(function (results) {
-          self.account = results[0].data || { balance: 0, frozenBalance: 0 };
-          self.activities = results[1].data || [];
-        }).catch(showError).then(function () {
-          self.loading = false;
-        });
-      },
-      goPlayground: function () {
-        location.href = '/playground.html';
-      },
-      goBilling: function () {
-        location.href = '/billing.html';
-      },
-      claim: function (act) {
-        var self = this;
-        api.claimCreditPackage(act.package_id).then(function () {
-          ELEMENT.Message.success('领取请求已提交，Credits 将异步到账');
-          self.load();
-        }).catch(showError);
-      }
-    }
-  });
-</script>
-</body>
-</html>
+Vue.use(ELEMENT);
+new Vue({el:'#app',mixins:[topbarMixin],data:function(){return{loading:false,account:{balance:0,frozenBalance:0},activities:[]};},
+created:function(){this.load();},methods:{
+  load:function(){var self=this;this.loading=true;var requests=[
+    api.creditAccount().then(function(res){self.account=res.data||self.account;}),
+    api.listActivities().then(function(res){self.activities=res.data||[];})];
+    Promise.all(requests.map(function(request){return request.catch(showError);})).then(function(){self.loading=false;});},
+  statusText:function(act){var now=Date.now(),start=new Date(act.activity.startTime).getTime(),end=new Date(act.activity.endTime).getTime();if(now<start)return'未开始';if(now>end)return'已结束';return'进行中';},
+  statusType:function(act){return this.statusText(act)==='进行中'?'success':'info';},
+  creditName:function(name){return String(name||'').replace(/Tokens?/gi,'Credits').replace(/Token/g,'Credits');},
+  goDetail:function(id){location.href='/detail.html?id='+id;},
+  goPage:function(path){location.href=path;}
+}});
+</script></body></html>

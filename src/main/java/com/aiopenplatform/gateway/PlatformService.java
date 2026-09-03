@@ -24,7 +24,7 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * The Credits business boundary: apps, API keys, model permissions, recharge,
+ * The Credits business boundary: apps, API keys, model permissions,
  * reservation/settlement, and the immutable call audit log live here.
  */
 @Service
@@ -111,22 +111,112 @@ public class PlatformService {
         return removed > 0;
     }
 
+    /** High-concurrency activity settlement: grant the claimed package to the canonical Credits account. */
     @Transactional
-    public Map<String, Object> recharge(Long userId, Long credits) {
-        if (credits == null || credits <= 0 || credits > 10_000_000L) {
-            throw new IllegalArgumentException("充值 Credits 必须在 1 至 10000000 之间");
+    public long grantCredits(Long userId, long credits, String referenceNo, String remark) {
+        if (userId == null || credits <= 0 || StrUtil.isBlank(referenceNo)) {
+            throw new IllegalArgumentException("Credits 发放参数错误");
         }
-        String orderNo = "R" + UUID.randomUUID().toString().replace("-", "");
-        jdbcTemplate.update("INSERT INTO tb_recharge_order(order_no,user_id,credits,amount,status,paid_time,create_time) VALUES(?,?,?,?,1,NOW(),NOW())",
-                orderNo, userId, credits, credits, 1);
         addCredits(userId, credits);
         long balance = currentBalance(userId);
-        writeLedger(userId, "RECHARGE", credits, balance, orderNo, "模拟充值成功");
-        Map<String, Object> result = new HashMap<>();
+        writeLedger(userId, "ACTIVITY_GRANT", credits, balance, referenceNo, StrUtil.blankToDefault(remark, "活动领取"));
+        return balance;
+    }
+
+    /**
+     * 演示环境的 Credits 购买闭环：后端确定套餐价格并立即确认模拟支付，
+     * 从而保持「订单、入账、账本」处于同一事务。
+     */
+    @Transactional
+    public Map<String, Object> purchaseCredits(Long userId, long credits) {
+        BigDecimal amount = purchaseAmount(credits);
+        String orderNo = "P" + UUID.randomUUID().toString().replace("-", "");
+        jdbcTemplate.update("INSERT INTO tb_credit_purchase_order(order_no,user_id,credit_amount,payment_amount,status,paid_time,create_time) VALUES(?,?,?,?,1,NOW(),NOW())",
+                orderNo, userId, credits, amount);
+        addCredits(userId, credits);
+        long balance = currentBalance(userId);
+        writeLedger(userId, "PURCHASE", credits, balance, orderNo, "模拟支付购买 Credits");
+        Map<String, Object> result = new LinkedHashMap<>();
         result.put("orderNo", orderNo);
         result.put("credits", credits);
+        result.put("paymentAmount", amount);
         result.put("balance", balance);
         return result;
+    }
+
+    /** Administrator adjustment; a negative amount is protected against overdraft. */
+    @Transactional
+    public long adjustCredits(Long userId, long signedAmount, String referenceNo, String remark) {
+        if (userId == null || signedAmount == 0 || StrUtil.isBlank(referenceNo)) {
+            throw new IllegalArgumentException("Credits 调整参数错误");
+        }
+        ensureAccount(userId);
+        lockAccount(userId);
+        if (signedAmount > 0) {
+            jdbcTemplate.update("UPDATE tb_credit_account SET balance=balance+?,update_time=NOW() WHERE user_id=?", signedAmount, userId);
+        } else {
+            long deduction = -signedAmount;
+            if (jdbcTemplate.update("UPDATE tb_credit_account SET balance=balance-?,update_time=NOW() WHERE user_id=? AND balance>=?", deduction, userId, deduction) != 1) {
+                throw new IllegalStateException("用户 Credits 余额不足");
+            }
+        }
+        long balance = currentBalance(userId);
+        writeLedger(userId, signedAmount > 0 ? "ADMIN_GRANT" : "ADMIN_DEDUCT", signedAmount, balance,
+                referenceNo, StrUtil.blankToDefault(remark, "管理员调整"));
+        return balance;
+    }
+
+    public Map<String, Object> creditSummary(Long userId) {
+        Map<String, Object> data = new LinkedHashMap<>(account(userId));
+        data.put("todayConsumed", sumLedger(userId, "DATE(create_time)=CURDATE() AND change_amount<0"));
+        data.put("monthConsumed", sumLedger(userId, "create_time>=DATE_SUB(NOW(),INTERVAL 30 DAY) AND change_amount<0"));
+        data.put("totalConsumed", sumLedger(userId, "change_amount<0"));
+        data.put("totalGranted", jdbcTemplate.queryForObject(
+                "SELECT COALESCE(SUM(change_amount),0) FROM tb_credit_ledger WHERE user_id=? AND change_amount>0", Long.class, userId));
+        return data;
+    }
+
+    public List<Map<String, Object>> creditDaily(Long userId, int days) {
+        int safeDays = Math.min(90, Math.max(1, days));
+        return jdbcTemplate.queryForList(
+                "SELECT DATE_FORMAT(create_time,'%Y-%m-%d') day,-SUM(change_amount) credits "
+                        + "FROM tb_credit_ledger WHERE user_id=? AND change_amount<0 AND create_time>=DATE_SUB(CURDATE(),INTERVAL ? DAY) "
+                        + "GROUP BY DATE(create_time) ORDER BY day", userId, safeDays - 1);
+    }
+
+    public Map<String, Object> creditRecords(Long userId, String type, int current, int size) {
+        int safeCurrent = Math.max(1, current);
+        int safeSize = Math.min(100, Math.max(1, size));
+        String filter = StrUtil.isBlank(type) ? "" : " AND change_type=?";
+        Object[] countArgs = StrUtil.isBlank(type) ? new Object[]{userId} : new Object[]{userId, type};
+        Long total = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM tb_credit_ledger WHERE user_id=?" + filter, Long.class, countArgs);
+        List<Map<String, Object>> records;
+        String select = "SELECT id,change_type AS changeType,change_amount AS changeAmount,balance_after AS balanceAfter,"
+                + "reference_no AS referenceNo,remark,create_time AS createTime FROM tb_credit_ledger WHERE user_id=?" + filter
+                + " ORDER BY create_time DESC LIMIT ?,?";
+        if (StrUtil.isBlank(type)) {
+            records = jdbcTemplate.queryForList(select, userId, (safeCurrent - 1) * safeSize, safeSize);
+        } else {
+            records = jdbcTemplate.queryForList(select, userId, type, (safeCurrent - 1) * safeSize, safeSize);
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("records", records);
+        result.put("total", total == null ? 0L : total);
+        return result;
+    }
+
+    private long sumLedger(Long userId, String condition) {
+        Long value = jdbcTemplate.queryForObject(
+                "SELECT COALESCE(-SUM(change_amount),0) FROM tb_credit_ledger WHERE user_id=? AND " + condition,
+                Long.class, userId);
+        return value == null ? 0L : value;
+    }
+
+    private BigDecimal purchaseAmount(long credits) {
+        if (credits == 1_000L) return new BigDecimal("10.00");
+        if (credits == 10_000L) return new BigDecimal("88.00");
+        if (credits == 100_000L) return new BigDecimal("800.00");
+        throw new IllegalArgumentException("请选择平台提供的 Credits 购买套餐");
     }
 
     public Map<String, Object> account(Long userId) {
@@ -248,7 +338,8 @@ public class PlatformService {
     }
 
     private void ensureAccount(Long userId) { jdbcTemplate.update("INSERT IGNORE INTO tb_credit_account(user_id,balance,frozen_balance,update_time) VALUES(?,0,0,NOW())", userId); }
-    private void addCredits(Long userId, Long credits) { ensureAccount(userId); jdbcTemplate.update("UPDATE tb_credit_account SET balance=balance+?,update_time=NOW() WHERE user_id=?", credits, userId); }
+    private void addCredits(Long userId, Long credits) { ensureAccount(userId); lockAccount(userId); jdbcTemplate.update("UPDATE tb_credit_account SET balance=balance+?,update_time=NOW() WHERE user_id=?", credits, userId); }
+    private void lockAccount(Long userId) { jdbcTemplate.queryForObject("SELECT balance FROM tb_credit_account WHERE user_id=? FOR UPDATE", Long.class, userId); }
     private long currentBalance(Long userId) { return jdbcTemplate.queryForObject("SELECT balance FROM tb_credit_account WHERE user_id=?", Long.class, userId); }
     private void writeLedger(Long userId, String type, long change, long balance, String ref, String remark) { jdbcTemplate.update("INSERT INTO tb_credit_ledger(user_id,change_type,change_amount,balance_after,reference_no,remark,create_time) VALUES(?,?,?,?,?,?,NOW())", userId, type, change, balance, ref, remark); }
     private Long longValue(Object value) { return ((Number) value).longValue(); }

@@ -1,86 +1,79 @@
-# AI Open Platform
+# High-Concurrency Credits Platform
 
-轻量级 AI 开放平台示例：开发者创建应用和 API Key 后，可通过 OpenAI-compatible API 调用 DeepSeek；平台按真实 usage 计费、扣减 Credits，并保留调用审计。Credits 活动继续采用 Redis Lua + Redis Stream 支撑高并发限量发放。
+一个以“高并发限量 Credits 抢购”为主题的 AI 开放平台。主链路展示 Redis Lua、Redis Stream、异步消费、幂等、超卖防护、失败补偿与多级缓存；API Key 和真实模型调用是 Credits 的消费出口，用于构成完整业务闭环。
 
-## 能力闭环
+## 业务闭环
 
 ```text
-注册登录 → 模拟充值 Credits → 创建 App / API Key → 绑定模型权限
-→ POST /v1/chat/completions → DeepSeek → usage 计费 → Credits 结算 → Ledger + CallLog
-
-Credits 活动：领取 → Redis Lua（库存/限购/XADD）→ Redis Stream Consumer
-           → MySQL（CreditOrder/CreditAccount/CreditLedger）
+运营后台配置活动 / Credits 包
+          ↓
+用户限量抢购 → Redis Lua 原子校验库存与限领 → XADD
+          ↓
+Redis Stream Consumer → MySQL 条件扣库存 → 订单与 Credits 账本同事务入账
+          ↓
+创建 App / tok_ API Key → OpenAI-compatible API → DeepSeek 真实 usage
+          ↓
+Credits 预占 → 调用 → 多退少补结算 → Ledger + CallLog
 ```
 
-Credits 是平台内部余额；`prompt_tokens` 和 `completion_tokens` 是模型返回的 LLM Token，用来计算 Credits 消耗，两者不混用。
+系统只有一种业务余额：`Credits`。LLM 返回的 `prompt_tokens` / `completion_tokens` 只是计费依据，不是第二种用户余额。
+
+## 关键设计
+
+- Lua 在 Redis 内原子完成库存、限领和入队，热点请求不直接冲击 MySQL。
+- Stream Consumer Group 异步落单，结合用户级锁、数据库幂等判断与 Pending List 补偿。
+- 库存更新使用条件 SQL，订单和 Credits 发放位于同一事务。
+- Credits 消费采用 `balance → frozen_balance → settle/release` 预占结算，供应商失败会释放冻结额度。
+- API Key 明文只显示一次，数据库仅保存 SHA-256 哈希和识别前缀。
+- 活动聚合数据经请求级、Caffeine、Redis、MySQL 多级缓存；后台更新会立即失效热点缓存。
+
+> 为兼容已有数据，高并发活动的物理表和部分 Java 实体仍保留 `token_*` / `Token*` 历史名称；对外 API、前端产品语义和账本均已统一为 Credits。
 
 ## 启动
 
+需要 JDK 17 或更高版本；构建统一输出 Java 17 字节码。
+
 ```powershell
-# 首次启动会依次导入基础库、历史秒杀演示表和新的 Credits 平台表
 docker compose up -d
-
-# 配置真实模型密钥（仅当前 PowerShell 会话）
 $env:DEEPSEEK_API_KEY = 'sk-...'
-
-# 启动后端
 mvn spring-boot:run -Dspring-boot.run.profiles=demo
 ```
 
-`docker-compose.yml` 会自动挂载并执行 [credit_platform.sql](src/main/resources/db/credit_platform.sql)。已有数据库可手动执行该文件；它是增量建表和种子数据，不会删除原有数据。
+Docker 演示环境使用 MySQL `3307`、Redis `6370`，后端默认为 `8081`。静态页经 Nginx 访问时，对外 Base URL 为 `http://<host>/api/v1`；直连 Spring Boot 时为 `http://<host>:8081/v1`。
 
-前端静态页仍由 `nginx-1.18.0` 托管；业务接口默认经 `/api` 代理到后端 8081。
+前端静态文件保存后刷新浏览器即可生效；Java Controller 或 Service 修改后必须停止旧的 `8081` 进程并重新启动，否则页面会调用到旧路由并返回 404。确认后端启动完成后，再访问 `http://localhost:8080`。
 
 ## 核心接口
 
 | 场景 | 接口 | 鉴权 |
 | --- | --- | --- |
-| 创建/查看 App | `POST /apps`、`GET /apps` | 登录态 |
-| 管理 API Key | `POST /apps/{id}/keys`、`PUT /apps/keys/{keyId}` | 登录态 |
-| Credits 账户 | `GET /credits/account` | 登录态 |
-| 模拟充值 | `POST /credits/recharge` | 登录态 |
-| Credits 活动 | `GET /credit-activities` | 公开 |
-| 领取活动包 | `POST /credit-activities/packages/{id}/claim` | 登录态 |
-| 可调用模型 | `GET /v1/models` | API Key |
-| 模型调用 | `POST /v1/chat/completions` | API Key |
+| 活动列表 / 详情 | `GET /credit-activities/list`, `GET /credit-activities/{id}` | 公开 |
+| 抢购 Credits 包 | `POST /credit-orders/claim/{skuId}` | 登录态 |
+| Credits 账户 / 账本 | `GET /credits/account`, `/summary`, `/daily`, `/records` | 登录态 |
+| 购买 Credits（模拟支付） | `POST /credits/purchase` | 登录态 |
+| App / API Key | `POST /apps`, `POST /apps/{id}/keys` | 登录态 |
+| 模型列表 | `GET /v1/models` | Bearer API Key |
+| 模型调用 | `POST /v1/chat/completions` | Bearer API Key |
+| 活动 / Credits 包运营 | `/admin/credit-activities`, `/admin/credit-packages` | 管理员 |
+| 用户 Credits 调整 | `PUT /admin/credits` | 管理员 |
 
-创建 API Key 时会返回一次明文 `tok_...`；数据库只保存 SHA-256 哈希与前缀。每个新 App 自动获得当前启用模型的权限，之后可通过 `tb_app_model` 在后台精确调整。
-
-## OpenAI-compatible 调用示例
+## 对外调用
 
 ```powershell
 curl http://localhost:8081/v1/chat/completions `
   -Method POST `
   -Headers @{ Authorization = 'Bearer tok_your_api_key'; 'Content-Type' = 'application/json' } `
-  -Body '{"model":"deepseek-chat","messages":[{"role":"user","content":"用一句话介绍 Credits 计费"}],"max_tokens":128}'
+  -Body '{"model":"deepseek-chat","messages":[{"role":"user","content":"你好"}],"max_tokens":128}'
 ```
 
-成功响应包含 OpenAI 格式的 `choices` 和 `usage.prompt_tokens`、`usage.completion_tokens`、`usage.total_tokens`。当前版本明确拒绝 `stream=true`，以避免将未结算的流式输出暴露给客户端；可在后续迭代以 Provider 流 + SSE 实现。
-
-## 计费与一致性
-
-1. 根据请求长度及 `max_tokens` 计算最高可能 Credits，原子地从 `balance` 转到 `frozen_balance`。
-2. 调用真实 Provider，读取返回的真实 usage，并按 `tb_model_price` 的输入/输出每 1K Token 价格计算实际 Credits。
-3. 结算时解冻预占额度、多退少补，写入 `tb_credit_ledger` 和 `tb_ai_call_log`；Provider 失败时释放全部冻结余额并写失败审计。
-
-默认 `deepseek-chat` 价格为输入 10、输出 20 Credits / 1K Tokens，仅作演示，可在 `tb_model_price` 修改。
-
-## Credits 活动的并发保证
-
-- Lua 在单次 Redis 命令中执行库存检查、限购检查、库存预扣与 `XADD`，避免“扣库存成功但消息丢失”。
-- Stream consumer 以用户维度 Redisson 锁串行处理；MySQL 以 `stock > 0` 条件更新再次防超卖。
-- 订单 ID 具备幂等性；数据库校验失败会执行 Lua 回滚 Redis 预扣。
-- 最终入账与 `CreditOrder`、`CreditLedger` 同步完成，保证账户余额可审计。
-
-## 数据表
-
-核心表为：`tb_app`、`tb_api_key`、`tb_model`、`tb_app_model`、`tb_model_price`、`tb_credit_account`、`tb_credit_ledger`、`tb_recharge_order`、`tb_credit_activity`、`tb_credit_package`、`tb_credit_order`、`tb_ai_call_log`。
+当前实现 OpenAI Chat Completions 兼容协议，可用于 curl、Python SDK 及支持自定义 Base URL 的普通 Agent。项目未实现 Responses API。
 
 ## 验证
 
 ```powershell
+mvn -q test
 mvn -q -DskipTests package
 git diff --check
 ```
 
-已完成构建验证。调用真实模型前必须设置 `DEEPSEEK_API_KEY`；未设置时接口会返回清晰的配置错误，且已预占的 Credits 会被释放。
+调用真实 DeepSeek 前必须配置 `DEEPSEEK_API_KEY`。未配置或供应商调用失败时，已预占的 Credits 会被释放并保留失败审计日志。

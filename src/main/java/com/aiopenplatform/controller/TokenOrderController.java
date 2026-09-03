@@ -18,18 +18,24 @@ import javax.annotation.Resource;
  * </p>
  */
 @RestController
-@RequestMapping("/token-order")
+@RequestMapping({"/credit-orders", "/token-order"})
 public class TokenOrderController {
 
     @Resource
     private ITokenOrderService tokenOrderService;
 
     /**
-     * 抢购/领取 Token 包：Lua 原子「库存校验 + 防重复领取 + 预扣 + 写 Stream」，
+     * 抢购/领取 Credits 包：Lua 原子「库存校验 + 防重复领取 + 预扣 + 写 Stream」，
      * 直接返回订单 id，真正的 token 发放由后台消费者异步完成
      */
-    @PostMapping("/grant/{skuId}")
+    @PostMapping("/claim/{skuId}")
     public Result grant(@PathVariable("skuId") Long skuId) {
+        return tokenOrderService.grantToken(skuId);
+    }
+
+    /** 兼容旧版客户端。 */
+    @PostMapping("/grant/{skuId}")
+    public Result legacyGrant(@PathVariable("skuId") Long skuId) {
         return tokenOrderService.grantToken(skuId);
     }
 

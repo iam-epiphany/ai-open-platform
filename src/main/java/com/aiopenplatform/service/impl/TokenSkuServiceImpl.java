@@ -9,6 +9,7 @@ import com.aiopenplatform.service.ITokenSkuService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.PostConstruct;
@@ -18,6 +19,7 @@ import java.util.List;
 import static com.aiopenplatform.utils.RedisConstants.TOKEN_SKU_KEY;
 import static com.aiopenplatform.utils.RedisConstants.TOKEN_SKU_TTL;
 import static com.aiopenplatform.utils.RedisConstants.TOKEN_STOCK_KEY;
+import static com.aiopenplatform.utils.RedisConstants.TOKEN_ACTIVITY_KEY;
 
 /**
  * <p>
@@ -34,12 +36,15 @@ public class TokenSkuServiceImpl extends ServiceImpl<TokenSkuMapper, TokenSku> i
     private MultiLevelCacheService multiLevelCacheService;
     @Resource
     private StringRedisTemplate stringRedisTemplate;
+    @Resource
+    private JdbcTemplate jdbcTemplate;
 
     @Value("${canal.enabled:true}")
     private boolean canalEnabled;
 
     /**
-     * 启动预热：将在售 SKU 的 DB 库存同步到 Redis（预扣库存，DB 为事实源）
+     * 启动预热：仅在 Redis 库存不存在时从 DB 初始化。
+     * 多节点扩容时不能覆盖已预扣的库存，否则会放大超卖风险。
      */
     @PostConstruct
     public void initStock() {
@@ -50,8 +55,8 @@ public class TokenSkuServiceImpl extends ServiceImpl<TokenSkuMapper, TokenSku> i
         }
         for (TokenSku sku : list) {
             String key = TOKEN_STOCK_KEY + sku.getId();
-            stringRedisTemplate.opsForValue().set(key, String.valueOf(sku.getStock()));
-            log.info("预热 Token 包库存到 Redis: key={}, stock={}", key, sku.getStock());
+            Boolean initialized = stringRedisTemplate.opsForValue().setIfAbsent(key, String.valueOf(sku.getStock()));
+            log.info("Credits 包库存预热: key={}, stock={}, initialized={}", key, sku.getStock(), initialized);
         }
     }
 
@@ -73,15 +78,39 @@ public class TokenSkuServiceImpl extends ServiceImpl<TokenSkuMapper, TokenSku> i
         if (!canalEnabled) {
             multiLevelCacheService.delete(JvmCaches.CACHE_SKU, TOKEN_SKU_KEY + sku.getId());
         }
-        log.info("新增 Token 包: id={}, packageName={}, stock={}", sku.getId(), sku.getPackageName(), sku.getStock());
+        log.info("新增 Credits 包: id={}, packageName={}, stock={}", sku.getId(), sku.getPackageName(), sku.getStock());
         return sku;
     }
 
     @Override
     public void updateSku(TokenSku sku) {
-        updateById(sku);
-        if (!canalEnabled) {
-            multiLevelCacheService.delete(JvmCaches.CACHE_SKU, TOKEN_SKU_KEY + sku.getId());
+        TokenSku previous = getById(sku.getId());
+        if (previous == null) {
+            throw new IllegalArgumentException("Credits 包不存在");
+        }
+        if (!updateById(sku)) {
+            throw new IllegalArgumentException("Credits 包不存在");
+        }
+        if (sku.getStock() != null) {
+            String stockKey = TOKEN_STOCK_KEY + sku.getId();
+            long previousStock = previous.getStock() == null ? 0L : previous.getStock();
+            long delta = sku.getStock() - previousStock;
+            // Redis stock may already contain in-flight reservations. Applying only
+            // the admin's delta preserves those reservations; overwriting with the
+            // DB value here could reopen sold stock and cause overselling.
+            if (Boolean.TRUE.equals(stringRedisTemplate.hasKey(stockKey))) {
+                if (delta != 0) {
+                    stringRedisTemplate.opsForValue().increment(stockKey, delta);
+                }
+            } else {
+                stringRedisTemplate.opsForValue().setIfAbsent(stockKey, String.valueOf(sku.getStock()));
+            }
+        }
+        multiLevelCacheService.delete(JvmCaches.CACHE_SKU, TOKEN_SKU_KEY + sku.getId());
+        List<Long> activityIds = jdbcTemplate.queryForList(
+                "SELECT id FROM tb_token_activity WHERE FIND_IN_SET(?,sku_ids)>0", Long.class, String.valueOf(sku.getId()));
+        for (Long activityId : activityIds) {
+            multiLevelCacheService.delete(JvmCaches.CACHE_ACTIVITY, TOKEN_ACTIVITY_KEY + activityId);
         }
     }
 }

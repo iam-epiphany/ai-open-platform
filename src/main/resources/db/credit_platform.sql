@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS `tb_credit_account` (
 CREATE TABLE IF NOT EXISTS `tb_credit_ledger` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `user_id` bigint unsigned NOT NULL,
-  `change_type` varchar(24) NOT NULL COMMENT 'RECHARGE, ACTIVITY_GRANT, CONSUME, REFUND',
+  `change_type` varchar(24) NOT NULL COMMENT 'ACTIVITY_GRANT, CONSUME, ADMIN_GRANT, ADMIN_DEDUCT, REFUND',
   `change_amount` bigint NOT NULL,
   `balance_after` bigint NOT NULL,
   `reference_no` varchar(64) NOT NULL,
@@ -75,49 +75,38 @@ CREATE TABLE IF NOT EXISTS `tb_credit_ledger` (
   PRIMARY KEY (`id`), KEY `idx_ledger_user_time` (`user_id`,`create_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE IF NOT EXISTS `tb_recharge_order` (
+CREATE TABLE IF NOT EXISTS `tb_credit_purchase_order` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `order_no` varchar(64) NOT NULL,
   `user_id` bigint unsigned NOT NULL,
-  `credits` bigint NOT NULL,
-  `amount` decimal(12,2) NOT NULL,
-  `status` tinyint NOT NULL COMMENT '1=paid (simulated)',
+  `credit_amount` bigint NOT NULL,
+  `payment_amount` decimal(10,2) NOT NULL,
+  `status` tinyint NOT NULL COMMENT '1=mock paid',
   `paid_time` datetime DEFAULT NULL,
   `create_time` datetime NOT NULL,
-  PRIMARY KEY (`id`), UNIQUE KEY `uk_recharge_order` (`order_no`), KEY `idx_recharge_user` (`user_id`)
+  PRIMARY KEY (`id`), UNIQUE KEY `uk_credit_purchase_order` (`order_no`), KEY `idx_credit_purchase_user` (`user_id`,`create_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE IF NOT EXISTS `tb_credit_activity` (
-  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
-  `title` varchar(128) NOT NULL,
-  `begin_time` datetime NOT NULL,
-  `end_time` datetime NOT NULL,
-  `status` tinyint NOT NULL DEFAULT 1,
-  `create_time` datetime NOT NULL,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-CREATE TABLE IF NOT EXISTS `tb_credit_package` (
-  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
-  `activity_id` bigint unsigned NOT NULL,
-  `package_name` varchar(128) NOT NULL,
-  `credit_amount` bigint NOT NULL,
-  `stock` int NOT NULL,
-  `limit_count` int NOT NULL DEFAULT 1,
-  `status` tinyint NOT NULL DEFAULT 1,
-  PRIMARY KEY (`id`), KEY `idx_package_activity` (`activity_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-CREATE TABLE IF NOT EXISTS `tb_credit_order` (
-  `id` bigint unsigned NOT NULL,
-  `user_id` bigint unsigned NOT NULL,
-  `package_id` bigint unsigned NOT NULL,
-  `credit_amount` bigint NOT NULL,
-  `status` tinyint NOT NULL DEFAULT 1,
-  `create_time` datetime NOT NULL,
-  `grant_time` datetime DEFAULT NULL,
-  PRIMARY KEY (`id`), KEY `idx_credit_order_user` (`user_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+-- 无损将旧模型额度池并入统一 Credits 账户；参考号保证重复执行不会二次入账。
+INSERT IGNORE INTO `tb_credit_account` (`user_id`,`balance`,`frozen_balance`,`update_time`)
+SELECT `user_id`,0,0,NOW() FROM `tb_user_quota` GROUP BY `user_id`;
+UPDATE `tb_credit_account` a
+JOIN (
+  SELECT q.`user_id`,SUM(q.`balance`) legacy_balance
+  FROM `tb_user_quota` q
+  WHERE q.`balance`>0 AND NOT EXISTS (
+    SELECT 1 FROM `tb_credit_ledger` l
+    WHERE l.`user_id`=q.`user_id` AND l.`reference_no`=CONCAT('LEGACY_QUOTA:',q.`user_id`)
+  ) GROUP BY q.`user_id`
+) x ON x.`user_id`=a.`user_id`
+SET a.`balance`=a.`balance`+x.legacy_balance,a.`update_time`=NOW();
+INSERT INTO `tb_credit_ledger` (`user_id`,`change_type`,`change_amount`,`balance_after`,`reference_no`,`remark`,`create_time`)
+SELECT q.`user_id`,'ACTIVITY_GRANT',SUM(q.`balance`),a.`balance`,CONCAT('LEGACY_QUOTA:',q.`user_id`),'历史额度迁移为 Credits',NOW()
+FROM `tb_user_quota` q JOIN `tb_credit_account` a ON a.`user_id`=q.`user_id`
+WHERE q.`balance`>0 AND NOT EXISTS (
+  SELECT 1 FROM `tb_credit_ledger` l
+  WHERE l.`user_id`=q.`user_id` AND l.`reference_no`=CONCAT('LEGACY_QUOTA:',q.`user_id`)
+) GROUP BY q.`user_id`,a.`balance`;
 
 CREATE TABLE IF NOT EXISTS `tb_ai_call_log` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
@@ -141,10 +130,3 @@ ON DUPLICATE KEY UPDATE display_name=VALUES(display_name),provider=VALUES(provid
 INSERT INTO `tb_model_price` (`model_id`,`input_credit_per_1k`,`output_credit_per_1k`,`update_time`)
 VALUES (1,10,20,NOW())
 ON DUPLICATE KEY UPDATE input_credit_per_1k=VALUES(input_credit_per_1k),output_credit_per_1k=VALUES(output_credit_per_1k),update_time=NOW();
-
-INSERT INTO `tb_credit_activity` (`id`,`title`,`begin_time`,`end_time`,`status`,`create_time`)
-VALUES (1,'新人 Credits 体验活动','2026-01-01 00:00:00','2030-12-31 23:59:59',1,NOW())
-ON DUPLICATE KEY UPDATE title=VALUES(title),status=VALUES(status);
-INSERT INTO `tb_credit_package` (`id`,`activity_id`,`package_name`,`credit_amount`,`stock`,`limit_count`,`status`)
-VALUES (1,1,'1000 Credits 新人体验包',1000,100,1,1)
-ON DUPLICATE KEY UPDATE package_name=VALUES(package_name),credit_amount=VALUES(credit_amount),status=VALUES(status);

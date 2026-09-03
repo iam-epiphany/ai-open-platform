@@ -78,6 +78,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
 
     @Override
     public Result login(LoginFormDTO loginForm, HttpSession session, HttpServletRequest request) {
+        if (loginForm == null) {
+            return Result.fail("请输入手机号和验证码");
+        }
         //校验手机号和验证码
         String phone = loginForm.getPhone();
         if (RegexUtils.isPhoneInvalid(phone)) {
@@ -90,7 +93,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         //从redis获取验证码
         String CacheCode = stringRedisTemplate.opsForValue().get(LOGIN_CODE_KEY + phone);
         String code = loginForm.getCode();
-        if(CacheCode ==null || !code.equals(CacheCode)){
+        if(CacheCode == null || !CacheCode.equals(code)){
             //登录失败计数，达到阈值拉黑（手机号 + 当前IP）
             recordLoginFail(phone, getClientIp(request));
             return Result.fail("验证码错误");
@@ -117,6 +120,10 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         );
         stringRedisTemplate.opsForHash().putAll(LOGIN_USER_KEY + token,userMap);
         stringRedisTemplate.expire(LOGIN_USER_KEY + token, LOGIN_USER_TTL, TimeUnit.MINUTES);
+        // 验证码只能使用一次；成功后同时清理本轮失败计数。
+        stringRedisTemplate.delete(LOGIN_CODE_KEY + phone);
+        stringRedisTemplate.delete(LOGIN_FAIL_KEY + "phone:" + phone);
+        stringRedisTemplate.delete(LOGIN_FAIL_KEY + "ip:" + getClientIp(request));
         return Result.ok(token);
     }
 

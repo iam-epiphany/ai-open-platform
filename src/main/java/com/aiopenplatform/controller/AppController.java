@@ -51,6 +51,9 @@ public class AppController {
     @PostMapping
     public Result createApp(@RequestBody Map<String, String> body) {
         UserDTO user = UserHolder.getUser();
+        if (body == null) {
+            return Result.fail("请输入应用名称");
+        }
         String appName = body.get("appName");
         if (StrUtil.isBlank(appName)) {
             return Result.fail("请输入应用名称");
@@ -102,6 +105,9 @@ public class AppController {
     @PutMapping("/keys/{keyId}")
     public Result toggleKey(@PathVariable("keyId") Long keyId, @RequestBody Map<String, Integer> body) {
         UserDTO user = UserHolder.getUser();
+        if (body == null) {
+            return Result.fail("状态参数错误");
+        }
         Integer status = body.get("status");
         if (status == null || (status != 0 && status != 1)) {
             return Result.fail("状态参数错误");
