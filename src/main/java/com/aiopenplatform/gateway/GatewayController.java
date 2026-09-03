@@ -1,6 +1,7 @@
 package com.aiopenplatform.gateway;
 
 import com.aiopenplatform.gateway.dto.ChatRequest;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -14,6 +15,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /** Public, OpenAI-compatible gateway. Authentication is enforced by ApiKeyInterceptor. */
+@Slf4j
 @RestController
 @RequestMapping("/v1")
 public class GatewayController {
@@ -29,6 +31,10 @@ public class GatewayController {
         } catch (IllegalStateException e) {
             HttpStatus status = e.getMessage() != null && e.getMessage().contains("余额不足") ? HttpStatus.PAYMENT_REQUIRED : HttpStatus.BAD_GATEWAY;
             return error(status, "api_error", e.getMessage());
+        } catch (RuntimeException e) {
+            // 兜底：保证 /v1 始终返回 OpenAI 兼容的 error 结构
+            log.error("网关调用异常", e);
+            return error(HttpStatus.INTERNAL_SERVER_ERROR, "api_error", "服务器内部错误");
         }
     }
 

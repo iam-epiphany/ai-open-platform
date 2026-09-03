@@ -26,7 +26,8 @@ import static com.aiopenplatform.utils.RedisConstants.TOKEN_GRANT_STREAM_KEY;
  * <p>
  * 消费端处理失败不 ACK 的消息会滞留 pending-list；
  * 本任务周期性扫描，认领（XCLAIM）闲置超过阈值的消息重新处理；
- * 同一消息投递超过 {@link #MAX_DELIVERY} 次仍失败则 ACK 丢弃并记错误日志（死信留痕），防止无限重试。
+ * 同一消息投递超过 {@link #MAX_DELIVERY} 次仍失败则回滚 Redis 预扣后 ACK 丢弃
+ * （死信留痕），防止无限重试，也避免预扣库存与用户领取标记永久泄漏。
  * </p>
  */
 @Slf4j
@@ -60,44 +61,66 @@ public class GrantPendingCompensator {
         }
 
         for (PendingMessage msg : pending) {
-            // 死信处理：投递次数超限，ACK 丢弃并告警
-            if (msg.getTotalDeliveryCount() > MAX_DELIVERY) {
-                stringRedisTemplate.opsForStream()
-                        .acknowledge(TOKEN_GRANT_STREAM_KEY, TOKEN_GRANT_GROUP, msg.getId());
-                log.error("发放消息投递 {} 次仍失败，ACK 丢弃（死信）: messageId={}, consumer={}",
-                        msg.getTotalDeliveryCount(), msg.getId().getValue(), msg.getConsumerName());
+            // 闲置超过阈值：XCLAIM 认领后重新处理
+            if (msg.getElapsedTimeSinceLastDelivery() == null
+                    || msg.getElapsedTimeSinceLastDelivery().getSeconds() < MIN_IDLE_SECONDS) {
                 continue;
             }
-            // 闲置超过阈值：XCLAIM 认领后重新处理
-            if (msg.getElapsedTimeSinceLastDelivery() != null
-                    && msg.getElapsedTimeSinceLastDelivery().getSeconds() >= MIN_IDLE_SECONDS) {
-                try {
-                    List<ByteRecord> claimed = stringRedisTemplate.execute(
-                            (org.springframework.data.redis.core.RedisCallback<List<ByteRecord>>) connection ->
-                                    connection.streamCommands().xClaim(
-                                            TOKEN_GRANT_STREAM_KEY.getBytes(StandardCharsets.UTF_8),
-                                            TOKEN_GRANT_GROUP,
-                                            TOKEN_GRANT_CONSUMER,
-                                            Duration.ofSeconds(MIN_IDLE_SECONDS),
-                                            msg.getId()));
-                    if (claimed != null) {
-                        for (ByteRecord record : claimed) {
-                            // ByteRecord 转字段（StringRedisTemplate 值本就是字符串）
-                            Map<Object, Object> value = new HashMap<>();
-                            record.getValue().forEach((k, v) -> value.put(new String(k), new String(v)));
-                            Long orderId = Long.valueOf(String.valueOf(value.get("orderId")));
-                            Long skuId = Long.valueOf(String.valueOf(value.get("skuId")));
-                            Long userId = Long.valueOf(String.valueOf(value.get("userId")));
-                            int limitCount = Integer.parseInt(String.valueOf(value.get("limitCount")));
-                            tokenGrantConsumer.processRecord(
-                                    record.getId().getValue(), orderId, skuId, userId, limitCount);
-                        }
-                    }
-                } catch (Exception e) {
-                    // 补偿重试仍失败：保留在 pending-list，等待下一轮
-                    log.warn("补偿重试仍失败，等待下一轮: messageId={}, err={}", msg.getId().getValue(), e.getMessage());
+            try {
+                List<ByteRecord> claimed = stringRedisTemplate.execute(
+                        (org.springframework.data.redis.core.RedisCallback<List<ByteRecord>>) connection ->
+                                connection.streamCommands().xClaim(
+                                        TOKEN_GRANT_STREAM_KEY.getBytes(StandardCharsets.UTF_8),
+                                        TOKEN_GRANT_GROUP,
+                                        TOKEN_GRANT_CONSUMER,
+                                        Duration.ofSeconds(MIN_IDLE_SECONDS),
+                                        msg.getId()));
+                if (claimed == null) {
+                    continue;
                 }
+                for (ByteRecord record : claimed) {
+                    // ByteRecord 转字段（StringRedisTemplate 值本就是字符串）
+                    Map<Object, Object> value = new HashMap<>();
+                    record.getValue().forEach((k, v) -> value.put(new String(k), new String(v)));
+                    Long orderId = Long.valueOf(String.valueOf(value.get("orderId")));
+                    Long skuId = Long.valueOf(String.valueOf(value.get("skuId")));
+                    Long userId = Long.valueOf(String.valueOf(value.get("userId")));
+                    int limitCount = Integer.parseInt(String.valueOf(value.get("limitCount")));
+                    retryOrDeadLetter(msg, record.getId().getValue(), orderId, skuId, userId, limitCount);
+                }
+            } catch (Exception e) {
+                // 补偿重试仍失败：保留在 pending-list，等待下一轮
+                log.warn("补偿重试仍失败，等待下一轮: messageId={}, err={}", msg.getId().getValue(), e.getMessage());
             }
+        }
+    }
+
+    /**
+     * 认领后重新处理；投递次数超限仍失败时回滚 Redis 预扣并 ACK（死信）。
+     * <p>
+     * 回滚以 orderId 幂等（SETNX 标记），与消费侧正常回滚共用同一脚本，
+     * 不会因重试路径重叠而重复恢复库存。
+     */
+    private void retryOrDeadLetter(PendingMessage msg, String messageId, Long orderId, Long skuId, Long userId, int limitCount) {
+        try {
+            tokenGrantConsumer.processRecord(messageId, orderId, skuId, userId, limitCount);
+        } catch (RuntimeException e) {
+            if (msg.getTotalDeliveryCount() <= MAX_DELIVERY) {
+                log.warn("补偿重试仍失败，等待下一轮: messageId={}, deliveries={}, err={}",
+                        messageId, msg.getTotalDeliveryCount(), e.getMessage());
+                return;
+            }
+            // 死信：若订单已落库（此前发放成功、仅 ACK 失败），直接 ACK 丢弃即可；
+            // 否则先回滚 Redis 预扣再 ACK，保证库存与领取标记不泄漏
+            if (tokenGrantConsumer.orderExists(orderId)) {
+                stringRedisTemplate.opsForStream().acknowledge(TOKEN_GRANT_STREAM_KEY, TOKEN_GRANT_GROUP, messageId);
+                log.warn("死信订单已发放，直接 ACK 丢弃: messageId={}, orderId={}", messageId, orderId);
+                return;
+            }
+            tokenGrantConsumer.rollbackGrant(orderId, skuId, userId, limitCount);
+            stringRedisTemplate.opsForStream().acknowledge(TOKEN_GRANT_STREAM_KEY, TOKEN_GRANT_GROUP, messageId);
+            log.error("发放消息投递 {} 次仍失败，已回滚预扣并 ACK 丢弃（死信）: messageId={}, orderId={}",
+                    msg.getTotalDeliveryCount(), messageId, orderId);
         }
     }
 }

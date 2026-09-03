@@ -30,7 +30,7 @@ public class BlackListInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
-        String ip = getClientIp(request);
+        String ip = ClientIpUtils.getClientIp(request);
         // 命中黑名单则拒绝访问
         if (BooleanUtil.isTrue(stringRedisTemplate.hasKey(BLACKLIST_IP_KEY + ip))) {
             log.warn("IP 已被拉黑, ip={}, uri={}", ip, request.getRequestURI());
@@ -40,18 +40,5 @@ public class BlackListInterceptor implements HandlerInterceptor {
             return false;
         }
         return true;
-    }
-
-    private String getClientIp(HttpServletRequest request) {
-        String ip = request.getHeader("X-Forwarded-For");
-        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-            ip = request.getRemoteAddr();
-        } else {
-            int idx = ip.indexOf(',');
-            if (idx > 0) {
-                ip = ip.substring(0, idx);
-            }
-        }
-        return ip;
     }
 }

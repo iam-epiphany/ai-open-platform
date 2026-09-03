@@ -80,12 +80,6 @@ var api = {
     adminCheck: function () {
         return http.get('/admin/check');
     },
-    adminOverview: function () {
-        return http.get('/admin/overview');
-    },
-    adminCallLogs: function (current, size) {
-        return http.get('/admin/call-logs', { params: { current: current || 1, size: size || 10 } });
-    },
     adminSkus: function () {
         return http.get('/admin/credit-packages');
     },

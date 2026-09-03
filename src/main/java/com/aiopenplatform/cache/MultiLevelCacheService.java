@@ -5,10 +5,14 @@ import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
 
 import javax.annotation.Resource;
+import java.util.Collections;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
@@ -85,13 +89,19 @@ public class MultiLevelCacheService {
 
     /**
      * Redis 层互斥锁回源：防止热点 key 过期瞬间大量请求同时打穿到 MySQL
+     * <p>
+     * 锁带持有者令牌，释放时经 Lua 校验令牌后才删除：
+     * 未抢到锁的线程（走递归重试）不会误删他人持有的锁；
+     * 锁超时被他人接管后，原持有者也无法删除新持有者的锁。
      */
     private <T> T queryFromDbWithMutex(String cacheName, String key, Class<T> type,
                                        Supplier<T> loader, Long redisTtlSec) {
         String lockKey = "lock:cache:" + key;
+        String token = UUID.randomUUID().toString();
+        boolean acquired = false;
         try {
-            boolean isLock = tryLock(lockKey);
-            if (!isLock) {
+            acquired = tryLock(lockKey, token);
+            if (!acquired) {
                 // 未拿到锁：说明其他线程正在回源，休眠后重试（走递归重新走缓存链路）
                 Thread.sleep(50);
                 return get(cacheName, key, type, loader, redisTtlSec);
@@ -126,7 +136,9 @@ public class MultiLevelCacheService {
             Thread.currentThread().interrupt();
             throw new RuntimeException("缓存回源被中断", e);
         } finally {
-            unlock(lockKey);
+            if (acquired) {
+                releaseLock(lockKey, token);
+            }
         }
     }
 
@@ -172,12 +184,20 @@ public class MultiLevelCacheService {
         stringRedisTemplate.convertAndSend(CACHE_INVALIDATE_CHANNEL, msg.toString());
     }
 
-    private boolean tryLock(String key) {
-        Boolean flag = stringRedisTemplate.opsForValue().setIfAbsent(key, "1", 10, TimeUnit.SECONDS);
+    private boolean tryLock(String key, String token) {
+        Boolean flag = stringRedisTemplate.opsForValue().setIfAbsent(key, token, 10, TimeUnit.SECONDS);
         return BooleanUtil.isTrue(flag);
     }
 
-    private void unlock(String key) {
-        stringRedisTemplate.delete(key);
+    private void releaseLock(String key, String token) {
+        // unlock.lua：仅当锁内令牌与自身一致时才删除，避免误删他人锁
+        stringRedisTemplate.execute(UNLOCK_SCRIPT, Collections.singletonList(key), token);
+    }
+
+    private static final DefaultRedisScript<Long> UNLOCK_SCRIPT;
+    static {
+        UNLOCK_SCRIPT = new DefaultRedisScript<>();
+        UNLOCK_SCRIPT.setLocation(new ClassPathResource("unlock.lua"));
+        UNLOCK_SCRIPT.setResultType(Long.class);
     }
 }

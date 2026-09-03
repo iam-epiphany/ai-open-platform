@@ -1,14 +1,9 @@
 package com.aiopenplatform.controller;
 
-import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.StrUtil;
 import com.aiopenplatform.dto.Result;
 import com.aiopenplatform.dto.UserDTO;
 import com.aiopenplatform.gateway.PlatformService;
-import com.aiopenplatform.entity.TokenApp;
-import com.aiopenplatform.entity.TokenApiKey;
-import com.aiopenplatform.service.ITokenAppService;
-import com.aiopenplatform.service.ITokenApiKeyService;
 import com.aiopenplatform.utils.UserHolder;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -21,9 +16,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import javax.annotation.Resource;
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -38,10 +31,6 @@ import java.util.Map;
 @RequestMapping("/apps")
 public class AppController {
 
-    @Resource
-    private ITokenAppService appService;
-    @Resource
-    private ITokenApiKeyService apiKeyService;
     @Resource
     private PlatformService platformService;
 

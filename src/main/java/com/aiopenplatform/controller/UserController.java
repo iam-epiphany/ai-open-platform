@@ -1,13 +1,9 @@
 package com.aiopenplatform.controller;
 
 
-import cn.hutool.core.bean.BeanUtil;
 import com.aiopenplatform.dto.LoginFormDTO;
 import com.aiopenplatform.dto.Result;
 import com.aiopenplatform.dto.UserDTO;
-import com.aiopenplatform.entity.User;
-import com.aiopenplatform.entity.UserInfo;
-import com.aiopenplatform.service.IUserInfoService;
 import com.aiopenplatform.service.IUserService;
 import com.aiopenplatform.utils.UserHolder;
 import lombok.extern.slf4j.Slf4j;
@@ -24,9 +20,6 @@ import static com.aiopenplatform.utils.RedisConstants.LOGIN_USER_KEY;
  * <p>
  * 前端控制器
  * </p>
- *
- * @author 虎哥
- * @since 2021-12-22
  */
 @Slf4j
 @RestController
@@ -35,9 +28,6 @@ public class UserController {
 
     @Resource
     private IUserService userService;
-
-    @Resource
-    private IUserInfoService userInfoService;
 
     @Resource
     private StringRedisTemplate stringRedisTemplate;
@@ -81,41 +71,5 @@ public class UserController {
         log.info("用户点击me");
         UserDTO user = UserHolder.getUser();
         return Result.ok(user);
-    }
-
-    @GetMapping("/info/{id}")
-    public Result info(@PathVariable("id") Long userId){
-        // 查询详情
-        UserInfo info = userInfoService.getById(userId);
-        if (info == null) {
-            // 没有详情，应该是第一次查看详情
-            return Result.ok();
-        }
-        info.setCreateTime(null);
-        info.setUpdateTime(null);
-        // 返回
-        return Result.ok(info);
-    }
-
-    @GetMapping("/{id}")
-    public Result queryUserById(@PathVariable("id") Long userId){
-        // 查询详情
-        User user = userService.getById(userId);
-        if (user == null) {
-            return Result.ok();
-        }
-        UserDTO userDTO = BeanUtil.copyProperties(user, UserDTO.class);
-        // 返回
-        return Result.ok(userDTO);
-    }
-
-    @PostMapping("/sign")
-    public Result sign(){
-        return userService.sign();
-    }
-
-    @GetMapping("/sign/count")
-    public Result signCount(){
-        return userService.signCount();
     }
 }

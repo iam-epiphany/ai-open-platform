@@ -4,15 +4,14 @@ import com.alibaba.otter.canal.client.CanalConnector;
 import com.alibaba.otter.canal.client.CanalConnectors;
 import com.alibaba.otter.canal.protocol.CanalEntry;
 import com.alibaba.otter.canal.protocol.Message;
-import com.aiopenplatform.entity.TokenActivity;
 import com.aiopenplatform.entity.TokenSku;
-import com.aiopenplatform.service.ITokenActivityService;
 import com.aiopenplatform.service.ITokenSkuService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.DisposableBean;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 import javax.annotation.Resource;
@@ -22,7 +21,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import static com.aiopenplatform.utils.RedisConstants.TOKEN_ACTIVITY_KEY;
-import static com.aiopenplatform.utils.RedisConstants.TOKEN_QUOTA_KEY;
 import static com.aiopenplatform.utils.RedisConstants.TOKEN_SKU_KEY;
 import static com.aiopenplatform.utils.RedisConstants.TOKEN_SKU_TTL;
 
@@ -33,7 +31,6 @@ import static com.aiopenplatform.utils.RedisConstants.TOKEN_SKU_TTL;
  * <ul>
  *     <li>tb_token_sku 详情变更 → 写透传 Redis（L2）+ 广播 JVM 缓存失效（L1）；</li>
  *     <li>活动页聚合数据变更 / SKU 变更影响活动聚合 → 删除聚合 key，下一次读请求重建；</li>
- *     <li>tb_user_quota 变更 → 删除权益缓存 key；</li>
  * </ul>
  * 跨节点 JVM 缓存失效通过 Redis Pub/Sub（cache:invalidate 频道）广播，由 {@link CacheInvalidationListener} 接收。
  * </p>
@@ -51,15 +48,15 @@ public class BinlogCacheSyncListener implements InitializingBean, DisposableBean
     private String destination;
     @Value("${canal.batch-size:100}")
     private int batchSize;
-    @Value("${canal.filter:token_platform\\.(tb_token_.*|tb_user_quota)}")
+    @Value("${canal.filter:token_platform\\.tb_token_.*}")
     private String filter;
 
     @Resource
     private ITokenSkuService tokenSkuService;
     @Resource
-    private ITokenActivityService tokenActivityService;
-    @Resource
     private MultiLevelCacheService multiLevelCacheService;
+    @Resource
+    private JdbcTemplate jdbcTemplate;
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor(
             r -> new Thread(r, "canal-binlog-listener"));
@@ -148,9 +145,6 @@ public class BinlogCacheSyncListener implements InitializingBean, DisposableBean
             case "tb_token_activity":
                 handleActivityChange(eventType, rowData);
                 break;
-            case "tb_user_quota":
-                handleQuotaChange(eventType, rowData);
-                break;
             default:
                 break;
         }
@@ -192,26 +186,14 @@ public class BinlogCacheSyncListener implements InitializingBean, DisposableBean
     }
 
     /**
-     * 用户权益变更：删除权益缓存 key，下一次读取重建
-     */
-    private void handleQuotaChange(CanalEntry.EventType eventType, CanalEntry.RowData rowData) {
-        Long userId = getColumnLong(rowData, "user_id");
-        Long modelId = getColumnLong(rowData, "model_id");
-        if (userId == null) {
-            return;
-        }
-        multiLevelCacheService.delete(JvmCaches.CACHE_QUOTA, TOKEN_QUOTA_KEY + userId + ":" + (modelId == null ? 0 : modelId));
-    }
-
-    /**
-     * 删除包含指定 SKU 的活动聚合缓存
+     * 删除包含指定 SKU 的活动聚合缓存（sku_ids 为逗号分隔列表，用 FIND_IN_SET 精确匹配）
      */
     private void invalidateActivitiesContaining(Long skuId) {
-        List<TokenActivity> activities = tokenActivityService.lambdaQuery()
-                .like(TokenActivity::getSkuIds, skuId)
-                .list();
-        for (TokenActivity activity : activities) {
-            multiLevelCacheService.delete(JvmCaches.CACHE_ACTIVITY, TOKEN_ACTIVITY_KEY + activity.getId());
+        List<Long> activityIds = jdbcTemplate.queryForList(
+                "SELECT id FROM tb_token_activity WHERE FIND_IN_SET(?, sku_ids) > 0",
+                Long.class, String.valueOf(skuId));
+        for (Long activityId : activityIds) {
+            multiLevelCacheService.delete(JvmCaches.CACHE_ACTIVITY, TOKEN_ACTIVITY_KEY + activityId);
         }
     }
 

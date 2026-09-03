@@ -5,9 +5,9 @@ spring:
     name: ai-open-platform
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://127.0.0.1:3306/token_platform?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true&useSSL=false
+    url: jdbc:mysql://127.0.0.1:3306/token_platform?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
     username: root
-    password: 20030226
+    password: ${MYSQL_PASSWORD:20030226}
   redis:
     host: localhost
     port: 6370
@@ -38,8 +38,7 @@ canal:
   destination: example
   batch-size: 100
   # 注意：YAML plain scalar 不做转义，此处为单反斜杠（Java 正则中 \. 匹配字面点）
-  # tb_user_quota 不在 tb_token_* 前缀内，需单独纳入订阅（权益扣减后缓存失效依赖它）
-  filter: token_platform\.(tb_token_.*|tb_user_quota)
+  filter: token_platform\.tb_token_.*
 
 # ============ 应用配置 ============
 app:
@@ -51,7 +50,7 @@ app:
 # 演示项目密码明文存储，生产环境建议改为 PasswordEncoder.encode() 的盐@密文格式（matches 校验自动兼容）
 admin:
   username: admin
-  password: 123456
+  password: ${ADMIN_PASSWORD:123456}
   phones: 13686869696
 
 # ============ AI Gateway ============

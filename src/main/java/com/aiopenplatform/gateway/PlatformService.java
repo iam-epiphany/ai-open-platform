@@ -17,6 +17,7 @@ import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -41,16 +42,19 @@ public class PlatformService {
         if (StrUtil.isBlank(rawKey) || !rawKey.startsWith("tok_")) {
             return null;
         }
+        String hash = SecureUtil.sha256(rawKey);
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(
                 "SELECT k.user_id, k.app_id FROM tb_api_key k JOIN tb_app a ON a.id=k.app_id "
                         + "WHERE k.key_hash=? AND k.status=1 AND a.status=1 "
                         + "AND (k.expire_time IS NULL OR k.expire_time > NOW())",
-                SecureUtil.sha256(rawKey));
+                hash);
         if (rows.isEmpty()) {
             return null;
         }
         Map<String, Object> row = rows.get(0);
-        jdbcTemplate.update("UPDATE tb_api_key SET last_used_time=NOW() WHERE key_hash=?", SecureUtil.sha256(rawKey));
+        // 最近使用时间最多每 5 分钟落库一次，避免每个请求都产生一次写放大
+        jdbcTemplate.update("UPDATE tb_api_key SET last_used_time=NOW() WHERE key_hash=? "
+                + "AND (last_used_time IS NULL OR last_used_time < DATE_SUB(NOW(), INTERVAL 5 MINUTE))", hash);
         return new ApiPrincipal(longValue(row.get("user_id")), longValue(row.get("app_id")));
     }
 
@@ -74,14 +78,37 @@ public class PlatformService {
     public List<Map<String, Object>> listApps(Long userId) {
         List<Map<String, Object>> apps = jdbcTemplate.queryForList(
                 "SELECT id,user_id AS userId,app_name AS appName,description,status,create_time AS createTime FROM tb_app WHERE user_id=? ORDER BY create_time DESC", userId);
+        if (apps.isEmpty()) {
+            return new ArrayList<>();
+        }
+        List<Long> appIds = new ArrayList<>();
+        for (Map<String, Object> app : apps) {
+            appIds.add(longValue(app.get("id")));
+        }
+        String marks = String.join(",", Collections.nCopies(appIds.size(), "?"));
+        Object[] idArgs = appIds.toArray();
+
+        // 批量取各应用的 Key 与模型授权，避免逐应用 N+1 查询
+        Map<Long, List<Map<String, Object>>> keysByApp = new HashMap<>();
+        for (Map<String, Object> row : jdbcTemplate.queryForList(
+                "SELECT id,app_id AS appId,prefix AS keyPrefix,status,expire_time AS expireTime,last_used_time AS lastUsedTime,create_time AS createTime "
+                        + "FROM tb_api_key WHERE app_id IN (" + marks + ") ORDER BY create_time DESC", idArgs)) {
+            keysByApp.computeIfAbsent(longValue(row.get("appId")), k -> new ArrayList<>()).add(row);
+        }
+        Map<Long, List<Map<String, Object>>> modelsByApp = new HashMap<>();
+        for (Map<String, Object> row : jdbcTemplate.queryForList(
+                "SELECT am.app_id AS appId,m.code,m.display_name AS displayName "
+                        + "FROM tb_model m JOIN tb_app_model am ON am.model_id=m.id WHERE am.app_id IN (" + marks + ") AND m.status=1", idArgs)) {
+            modelsByApp.computeIfAbsent(longValue(row.get("appId")), k -> new ArrayList<>()).add(row);
+        }
+
         List<Map<String, Object>> result = new ArrayList<>();
         for (Map<String, Object> app : apps) {
             Long id = longValue(app.get("id"));
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("app", app);
-            item.put("keys", jdbcTemplate.queryForList(
-                    "SELECT id,app_id AS appId,prefix AS keyPrefix,status,expire_time AS expireTime,last_used_time AS lastUsedTime,create_time AS createTime FROM tb_api_key WHERE app_id=? ORDER BY create_time DESC", id));
-            item.put("models", jdbcTemplate.queryForList("SELECT m.code,m.display_name AS displayName FROM tb_model m JOIN tb_app_model am ON am.model_id=m.id WHERE am.app_id=? AND m.status=1", id));
+            item.put("keys", keysByApp.getOrDefault(id, Collections.emptyList()));
+            item.put("models", modelsByApp.getOrDefault(id, Collections.emptyList()));
             result.add(item);
         }
         return result;
@@ -293,7 +320,9 @@ public class PlatformService {
     private void settle(Long userId, long reserved, long actual, String model, ProviderChatResponse response, long begin) {
         transactionTemplate.execute(status -> {
             ensureAccount(userId);
-            int updated = jdbcTemplate.update("UPDATE tb_credit_account SET frozen_balance=frozen_balance-?,balance=balance+?-?,update_time=NOW() WHERE user_id=? AND frozen_balance>=?", reserved, reserved, actual, userId, reserved);
+            // 结算同时校验冻结额与「结算后余额不为负」：actual 超出预占时不允许把余额扣成负数
+            int updated = jdbcTemplate.update("UPDATE tb_credit_account SET frozen_balance=frozen_balance-?,balance=balance+?-?,update_time=NOW() "
+                    + "WHERE user_id=? AND frozen_balance>=? AND balance+?-?>=0", reserved, reserved, actual, userId, reserved, reserved, actual);
             if (updated != 1) throw new IllegalStateException("Credits 结算失败，请联系管理员");
             long balance = currentBalance(userId);
             String ref = "C" + UUID.randomUUID().toString().replace("-", "");

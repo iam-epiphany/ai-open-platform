@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
+import static com.aiopenplatform.utils.RedisConstants.TOKEN_COUNT_TTL;
 import static com.aiopenplatform.utils.RedisConstants.TOKEN_GRANT_CONSUMER;
 import static com.aiopenplatform.utils.RedisConstants.TOKEN_GRANT_GROUP;
 import static com.aiopenplatform.utils.RedisConstants.TOKEN_GRANT_STREAM_KEY;
@@ -137,7 +138,7 @@ public class TokenGrantConsumer {
             GrantResult result = tokenOrderService.grantTokenOrder(orderId, skuId, userId);
             if (result == GrantResult.DUPLICATE_ALREADY_GRANTED || result == GrantResult.STOCK_NOT_ENOUGH) {
                 // DB 校验不通过（已领取/库存不足）：回滚 Redis 预扣，保持 Redis 与 DB 库存一致
-                rollbackGrant(skuId, userId, limitCount);
+                rollbackGrant(orderId, skuId, userId, limitCount);
             }
             // 处理完成（成功/重复消息/已回滚），ACK
             stringRedisTemplate.opsForStream().acknowledge(TOKEN_GRANT_STREAM_KEY, TOKEN_GRANT_GROUP, messageId);
@@ -152,11 +153,22 @@ public class TokenGrantConsumer {
     }
 
     /**
-     * 回滚 Redis 预扣库存与用户记录（原子 Lua）
+     * 订单是否已落库（发放成功/幂等判断用；死信补偿前先确认，避免对已发放订单误回滚预扣）
      */
-    private void rollbackGrant(Long skuId, Long userId, int limitCount) {
-        stringRedisTemplate.execute(ROLLBACK_SCRIPT, Collections.emptyList(),
-                String.valueOf(skuId), String.valueOf(userId), String.valueOf(limitCount));
-        log.warn("已回滚 Redis 预扣: skuId={}, userId={}", skuId, userId);
+    public boolean orderExists(Long orderId) {
+        return tokenOrderService.getById(orderId) != null;
+    }
+
+    /**
+     * 回滚 Redis 预扣库存与用户记录（原子 Lua，按订单幂等）
+     * <p>
+     * 脚本以 orderId 的 SETNX 标记保证同一订单只回滚一次：消息重投递、
+     * 死信补偿与消费处理并发时不会重复恢复库存。
+     */
+    public void rollbackGrant(Long orderId, Long skuId, Long userId, int limitCount) {
+        Long result = stringRedisTemplate.execute(ROLLBACK_SCRIPT, Collections.emptyList(),
+                String.valueOf(skuId), String.valueOf(userId), String.valueOf(limitCount),
+                String.valueOf(orderId), String.valueOf(TOKEN_COUNT_TTL));
+        log.warn("已回滚 Redis 预扣: orderId={}, skuId={}, userId={}, applied={}", orderId, skuId, userId, result);
     }
 }

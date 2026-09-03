@@ -5,22 +5,18 @@ import cn.hutool.core.bean.copier.CopyOptions;
 import cn.hutool.core.lang.UUID;
 import cn.hutool.core.util.BooleanUtil;
 import cn.hutool.core.util.StrUtil;
-import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.aiopenplatform.dto.AdminLoginDTO;
 import com.aiopenplatform.dto.Result;
 import com.aiopenplatform.dto.UserDTO;
 import com.aiopenplatform.cache.JvmCaches;
 import com.aiopenplatform.cache.MultiLevelCacheService;
 import com.aiopenplatform.entity.TokenActivity;
-import com.aiopenplatform.entity.TokenCallLog;
 import com.aiopenplatform.entity.TokenSku;
 import com.aiopenplatform.gateway.PlatformService;
-import com.aiopenplatform.mapper.TokenAppMapper;
-import com.aiopenplatform.mapper.TokenOrderMapper;
 import com.aiopenplatform.mapper.UserMapper;
 import com.aiopenplatform.service.ITokenActivityService;
-import com.aiopenplatform.service.ITokenCallLogService;
 import com.aiopenplatform.service.ITokenSkuService;
+import com.aiopenplatform.utils.ClientIpUtils;
 import com.aiopenplatform.utils.UserHolder;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -74,12 +70,6 @@ public class AdminController {
     @Resource
     private UserMapper userMapper;
     @Resource
-    private TokenOrderMapper orderMapper;
-    @Resource
-    private TokenAppMapper appMapper;
-    @Resource
-    private ITokenCallLogService callLogService;
-    @Resource
     private ITokenSkuService skuService;
     @Resource
     private ITokenActivityService activityService;
@@ -105,7 +95,7 @@ public class AdminController {
             return Result.fail("账号密码不能为空");
         }
         // IP 黑名单检查：被拉黑的 IP 禁止登录
-        String ip = getClientIp(request);
+        String ip = ClientIpUtils.getClientIp(request);
         if (BooleanUtil.isTrue(stringRedisTemplate.hasKey(BLACKLIST_IP_KEY + ip))) {
             return Result.fail("登录失败次数过多，请 30 分钟后再试");
         }
@@ -147,6 +137,7 @@ public class AdminController {
 
     /**
      * 平台总览：用户数 / 订单数 / 应用数 / 发放总量 / 消耗总量 / 调用次数
+     * 数据均来自当前 Credits 事实源（tb_credit_ledger / tb_ai_call_log）。
      */
     @GetMapping("/overview")
     public Result overview() {
@@ -155,26 +146,15 @@ public class AdminController {
         }
         Map<String, Object> data = new HashMap<>();
         data.put("userCount", userMapper.selectCount(null));
-        data.put("orderCount", orderMapper.selectCount(null));
-        data.put("appCount", appMapper.selectCount(null));
+        data.put("orderCount", jdbcTemplate.queryForObject("SELECT COUNT(*) FROM tb_token_order", Long.class));
+        data.put("appCount", jdbcTemplate.queryForObject("SELECT COUNT(*) FROM tb_app", Long.class));
         data.put("grantTotal", jdbcTemplate.queryForObject(
                 "SELECT COALESCE(SUM(change_amount),0) FROM tb_credit_ledger WHERE change_amount>0", Long.class));
-        data.put("consumeTotal", callLogService.sumTotalTokens());
-        data.put("callCount", callLogService.countTotal());
+        data.put("consumeTotal", jdbcTemplate.queryForObject(
+                "SELECT COALESCE(SUM(credit_cost),0) FROM tb_ai_call_log WHERE status=1", Long.class));
+        data.put("callCount", jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM tb_ai_call_log WHERE status=1", Long.class));
         return Result.ok(data);
-    }
-
-    /**
-     * 全部调用日志（分页）
-     */
-    @GetMapping("/call-logs")
-    public Result callLogs(@RequestParam(value = "current", defaultValue = "1") int current,
-                           @RequestParam(value = "size", defaultValue = "10") int size) {
-        if (!isAdmin()) {
-            return Result.fail("无权限");
-        }
-        IPage<TokenCallLog> page = callLogService.pageAll(current, size);
-        return Result.ok(page.getRecords(), page.getTotal());
     }
 
     /** Credits 平台统计：今日调用、今日消耗、模型调用排行与余额总量。 */
@@ -372,21 +352,5 @@ public class AdminController {
             stringRedisTemplate.delete(ipFailKey);
             log.warn("管理员登录失败次数过多，已拉黑 IP: ip={}", ip);
         }
-    }
-
-    /**
-     * 获取客户端真实 IP（兼容反向代理 X-Forwarded-For）
-     */
-    private String getClientIp(HttpServletRequest request) {
-        String ip = request.getHeader("X-Forwarded-For");
-        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-            ip = request.getRemoteAddr();
-        } else {
-            int idx = ip.indexOf(',');
-            if (idx > 0) {
-                ip = ip.substring(0, idx);
-            }
-        }
-        return ip;
     }
 }

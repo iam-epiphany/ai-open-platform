@@ -7,12 +7,14 @@
 -- ARGV[2]  = userId
 -- ARGV[3]  = orderId
 -- ARGV[4]  = limitCount（<=1 一人一份；>1 限购 N）
+-- ARGV[5]  = ttlSeconds（granted/count key 过期秒数，防 key 无限残留）
 -- 返回：-1 库存不足；-2 不能重复领取；-3 超出限购；-4 系统异常（XADD 失败）；>=0 剩余库存
 
 local stockKey = KEYS[1]
 local grantedKey = KEYS[2]
 local countKey = KEYS[3]
 local streamKey = KEYS[4]
+local ttl = ARGV[5]
 
 -- 1. 库存校验
 local stock = tonumber(redis.call('get', stockKey) or '-1')
@@ -29,14 +31,20 @@ if tonumber(ARGV[4]) <= 1 then
 else
     -- 企业团队共享池：限购 N 份
     local cnt = tonumber(redis.call('incr', countKey))
+    if cnt == 1 then
+        redis.call('expire', countKey, ttl)
+    end
     if cnt > tonumber(ARGV[4]) then
         redis.call('decr', countKey)
         return -3
     end
 end
 
--- 3. 预扣库存 + 记录已领取用户
+-- 3. 预扣库存 + 记录已领取用户（集合首次创建时设置过期）
 redis.call('incrby', stockKey, -1)
+if redis.call('scard', grantedKey) == 0 then
+    redis.call('expire', grantedKey, ttl)
+end
 redis.call('sadd', grantedKey, ARGV[2])
 
 -- 4. 写入 Redis Stream（与预扣同一原子操作，避免「预扣成功但消息丢失」）

@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Map;
 
 import static com.aiopenplatform.utils.RedisConstants.TOKEN_COUNT_KEY;
+import static com.aiopenplatform.utils.RedisConstants.TOKEN_COUNT_TTL;
 import static com.aiopenplatform.utils.RedisConstants.TOKEN_GRANTED_KEY;
 import static com.aiopenplatform.utils.RedisConstants.TOKEN_GRANT_STREAM_KEY;
 import static com.aiopenplatform.utils.RedisConstants.TOKEN_STOCK_KEY;
@@ -106,7 +107,8 @@ public class TokenOrderServiceImpl extends ServiceImpl<TokenOrderMapper, TokenOr
                         TOKEN_GRANTED_KEY + skuId,
                         TOKEN_COUNT_KEY + skuId + ":" + userId,
                         TOKEN_GRANT_STREAM_KEY),
-                String.valueOf(skuId), String.valueOf(userId), String.valueOf(orderId), String.valueOf(limitCount)
+                String.valueOf(skuId), String.valueOf(userId), String.valueOf(orderId),
+                String.valueOf(limitCount), String.valueOf(TOKEN_COUNT_TTL)
         );
         // -1 库存不足；-2 不能重复领取；-3 超出限购；-4 系统异常（XADD 失败，已回滚）
         if (result == null || result < 0) {

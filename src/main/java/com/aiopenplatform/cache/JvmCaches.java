@@ -25,15 +25,12 @@ public class JvmCaches {
     public static final String CACHE_SKU = "sku";
     /** 缓存域：活动页聚合 */
     public static final String CACHE_ACTIVITY = "activity";
-    /** 缓存域：用户权益 */
-    public static final String CACHE_QUOTA = "quota";
 
     private final Map<String, Cache<String, String>> caches = new ConcurrentHashMap<>();
 
     public JvmCaches() {
         caches.put(CACHE_SKU, build(500, 5));
         caches.put(CACHE_ACTIVITY, build(200, 5));
-        caches.put(CACHE_QUOTA, build(1000, 5));
     }
 
     private Cache<String, String> build(long maximumSize, long expireMinutes) {

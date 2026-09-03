@@ -58,7 +58,6 @@ public class MvcConfig implements WebMvcConfigurer {
                         "/user/login",
                         "/user/code",
                         "/admin/login",
-                        "/upload/**",
                         "/token-sku/**",
                         "/token-activity/**",
                         "/credit-packages/**",
