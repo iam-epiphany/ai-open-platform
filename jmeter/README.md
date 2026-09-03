@@ -40,3 +40,18 @@ jmeter -n -t token-grant-stress.jmx -l results.jtl -e -o report `
 ## 验收
 
 等待应用日志显示 Stream 消费完成，再执行 [verify-token-grant.sql](verify-token-grant.sql)：成功订单数不能超过压测前库存，同一用户不能有多笔订单；同时比对 MySQL `tb_token_sku.stock` 与 Redis `token:stock:<skuId>`。
+
+## 2026-09-03 压测补充脚本（详见 docs/压测报告-2026-09-03.md）
+
+| 脚本 | 用途 |
+| --- | --- |
+| `token-grant-ramp.jmx` | 无同步器的抢购容量版：线程 ramp 爬坡连续请求，避免瞬时建连拒绝干扰 |
+| `v1-gateway-stress.jmx` | `/v1/chat/completions` 持续施压（时长/线程参数化，业务码分类：400/402/502=预期失败） |
+| `mixed-scenario.jmx` | 三组混合：v1 网关 + 抢购突发 + 活动页读（CSV 必须嵌套在各线程组内，防止跨组消费） |
+| `setup/prepare-stress-data.sh` | 幂等造数：压测 SKU(1001/1002/1004)+活动、3000 用户、800 个 API Key+余额、Redis 登录态、`data/*.csv`（**注意**：`data/` 为生成目录不入库，重跑本脚本即可再生成） |
+| `setup/soak-orchestrate.sh` | S7 半小时 soak 一键编排（含第 10 分钟 1000 人抢购 + kill 应用 60s 的补偿验证） |
+
+压测要点速记：
+
+- 全链路一致性断言：`tb_token_order` 订单数 ≤ 初始库存、同用户同 SKU 无重复、`tb_token_sku.stock` 与 Redis `token:stock:<skuId>` 终值一致、`tb_credit_ledger` ACTIVITY_GRANT 行数与总额对账、冻结恒为 0、Stream `XPENDING` 归 0。
+- 已知边界（2026-09-03 本机实测）：MySQL 默认提交 fsync 下 `/v1` 写链 265~540 rps（放宽持久化后 1,258 rps）；HikariCP 默认 10 连接为并发天花板（50~400 并发吞吐恒 ~520 rps）；抢购异步发放单消费者 ~45-60 单/s；瞬时 500 新建连接约半数被拒（Tomcat acceptCount=100）。
