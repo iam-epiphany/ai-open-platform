@@ -47,6 +47,16 @@ app:
   upload-dir: nginx-1.18.0/html/token/imgs/
 
 # ============ 管理后台 ============
-# 管理员手机号白名单（逗号分隔）：登录后 /admin/** 接口按此校验
+# 管理员账号密码登录（POST /admin/login）：账号密码与 admin.phones 手机号白名单两种方式均可进入管理后台
+# 演示项目密码明文存储，生产环境建议改为 PasswordEncoder.encode() 的盐@密文格式（matches 校验自动兼容）
 admin:
+  username: admin
+  password: 123456
   phones: 13686869696
+
+# ============ AI Gateway ============
+# 将 DEEPSEEK_API_KEY 写入系统环境变量，避免把真实密钥提交到版本库。
+ai:
+  deepseek:
+    base-url: https://api.deepseek.com
+    api-key: ${DEEPSEEK_API_KEY:}

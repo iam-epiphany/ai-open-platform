@@ -15,7 +15,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 import static com.aiopenplatform.utils.RedisConstants.CACHE_NULL_TTL;
-import static com.aiopenplatform.utils.RedisConstants.LOCK_SHOP_KEY;
+import static com.aiopenplatform.utils.RedisConstants.LOCK_CACHE_REBUILD_KEY;
 
 @Slf4j
 @Component
@@ -44,7 +44,7 @@ public class CacheClient {
 
     public <R,ID> R queryWithPassThrough(String keyPrefix, ID id, Class<R> type, Function<ID, R> dbFallback, Long time, TimeUnit unit){
         String key = keyPrefix + id;
-        // 1.从redis查询商铺缓存
+        // 1. 从 Redis 查询缓存
         String json = stringRedisTemplate.opsForValue().get(key);
         // 2.判断是否存在
         if (StrUtil.isNotBlank(json)) {
@@ -92,7 +92,7 @@ public class CacheClient {
         // 5.2.已过期，需要缓存重建
         // 6.缓存重建
         // 6.1.获取互斥锁
-        String lockKey = LOCK_SHOP_KEY + id;
+        String lockKey = LOCK_CACHE_REBUILD_KEY + id;
         boolean isLock = tryLock(lockKey);
         // 6.2.判断是否获取锁成功
         if (isLock){
@@ -132,7 +132,7 @@ public class CacheClient {
 
         // 4.实现缓存重建
         // 4.1.获取互斥锁
-        String lockKey = LOCK_SHOP_KEY + id;
+        String lockKey = LOCK_CACHE_REBUILD_KEY + id;
         R r = null;
         try {
             boolean isLock = tryLock(lockKey);

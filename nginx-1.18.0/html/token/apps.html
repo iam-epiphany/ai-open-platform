@@ -17,8 +17,9 @@
         <template v-if="logged">
           <a class="link" href="index.html">控制台</a>
           <a class="link" href="playground.html">模型调用</a>
+          <a class="link active" href="apps.html">API 管理</a>
           <a class="link" href="billing.html">账单</a>
-          <a class="link" href="orders.html">订单</a>
+          <a class="link" href="orders.html?v=nav-keep">订单</a>
           <a class="link" href="me.html">个人中心</a>
           <a class="link" v-if="isAdmin" href="admin.html">管理后台</a>
           <span class="nick">{{ me.nickName }}</span>
@@ -39,8 +40,8 @@
 
     <div class="panel" style="margin-bottom:20px;">
       <div style="font-size:13px;color:#606266;line-height:1.8;">
-        使用方式：调用 <code class="mono">/api/ai/chat</code> 时在请求头携带
-        <code class="mono">X-Api-Key: &lt;你的密钥&gt;</code>，系统按你的 Token 余额计费。
+        使用方式：调用 <code class="mono">POST /v1/chat/completions</code> 时在请求头携带
+        <code class="mono">Authorization: Bearer &lt;你的密钥&gt;</code>，系统按真实 usage 从 Credits 余额计费。
         密钥明文仅在创建时显示一次，库中只保存哈希，请妥善保管。
       </div>
     </div>
@@ -60,6 +61,10 @@
         </div>
       </div>
       <p style="font-size:13px;color:#909399;margin:0 0 10px;">{{ item.app.description || '暂无描述' }}</p>
+      <div style="margin:0 0 12px;">
+        <span style="font-size:12px;color:#667085;margin-right:8px;">允许调用：</span>
+        <el-tag v-for="model in item.models" :key="model.code" size="mini" type="info" style="margin-right:6px;">{{ model.displayName || model.display_name || model.code }}</el-tag>
+      </div>
 
       <el-table :data="item.keys" size="mini" style="width:100%;">
         <el-table-column label="密钥前缀" width="220">

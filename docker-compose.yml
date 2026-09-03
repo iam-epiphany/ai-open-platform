@@ -20,6 +20,7 @@ services:
       - --sql-mode=STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION
     volumes:
       - ./docker/mysql/init:/docker-entrypoint-initdb.d
+      - ./src/main/resources/db/credit_platform.sql:/docker-entrypoint-initdb.d/04-credit_platform.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p20030226"]
       interval: 5s

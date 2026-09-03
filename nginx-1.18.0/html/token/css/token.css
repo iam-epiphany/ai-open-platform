@@ -3,34 +3,62 @@
 * { box-sizing: border-box; }
 body {
   margin: 0;
-  background: #f5f7fa;
-  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
-  color: #303133;
+  min-height: 100vh;
+  padding-left: 248px;
+  background: #f3f6fb;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: #1d2939;
 }
 
-/* ===== 顶栏 ===== */
+/* ===== 控制台侧栏 ===== */
 .topbar {
-  background: linear-gradient(90deg, #1f2d3d, #263445);
+  position: fixed;
+  z-index: 20;
+  inset: 0 auto 0 0;
+  width: 248px;
+  overflow: hidden;
+  background: #101828;
   color: #fff;
+  border-right: 1px solid rgba(255,255,255,.08);
 }
 .topbar-inner {
-  max-width: 1100px;
-  margin: 0 auto;
-  height: 60px;
+  width: 100%;
+  height: 100%;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: space-between;
-  padding: 0 16px;
+  padding: 26px 14px 18px;
 }
-.logo { color: #fff; font-size: 18px; font-weight: 600; text-decoration: none; letter-spacing: 1px; }
-.topbar-right { display: flex; align-items: center; gap: 16px; }
-.nick { color: #ffd04b; font-size: 14px; }
-.link { color: #dcdfe6; text-decoration: none; font-size: 14px; }
-.link:hover { color: #fff; }
+.logo {
+  width: 100%;
+  padding: 0 12px 24px;
+  color: #fff;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.3;
+  text-decoration: none;
+  letter-spacing: -.2px;
+}
+.topbar-right { display: flex; flex: 1; flex-direction: column; align-items: stretch; width: 100%; gap: 4px; }
+.nick { margin: auto 12px 4px; color: #cbd5e1; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.link {
+  position: relative;
+  display: block;
+  padding: 10px 12px;
+  border-radius: 7px;
+  color: #98a2b3;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background .18s ease, color .18s ease;
+}
+.link:hover, .link:focus { color: #f8fafc; background: rgba(255,255,255,.065); outline: none; }
+.link.active { color: #fff; font-weight: 650; background: #1d3b68; box-shadow: inset 3px 0 0 #65a8ff; }
+.topbar .el-button { width: 100%; margin: 0; border-radius: 7px; }
 
 /* ===== 布局 ===== */
-.container { max-width: 1100px; margin: 24px auto; padding: 0 16px; }
-.page-title { font-size: 20px; margin: 8px 0 20px; }
+.container { max-width: 1280px; margin: 0 auto; padding: 34px 42px 48px; }
+.page-title { font-size: 24px; letter-spacing: -.4px; margin: 2px 0 26px; }
 
 /* ===== 活动卡片 ===== */
 .activity-card {
@@ -214,3 +242,18 @@ body {
 
 /* 管理后台概览 */
 .mono { font-family: Consolas, Monaco, monospace; }
+
+/* 登录页不继承工作台侧栏的留白。 */
+.login-page { position: fixed; inset: 0; z-index: 30; }
+
+@media (max-width: 860px) {
+  body { padding-left: 0; }
+  .topbar { position: static; width: 100%; overflow: visible; }
+  .topbar-inner { min-height: 58px; height: auto; flex-direction: row; padding: 8px 14px; gap: 12px; }
+  .logo { width: auto; padding: 0; white-space: nowrap; font-size: 15px; }
+  .topbar-right { flex: 1; flex-direction: row; align-items: center; gap: 2px; overflow-x: auto; height: auto; }
+  .link { padding: 8px 9px; white-space: nowrap; font-size: 13px; }
+  .nick { margin: 0 4px 0 auto; min-width: max-content; }
+  .topbar .el-button { width: auto; flex: 0 0 auto; }
+  .container { padding: 24px 16px 36px; }
+}

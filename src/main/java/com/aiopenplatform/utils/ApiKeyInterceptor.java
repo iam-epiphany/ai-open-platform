@@ -2,6 +2,9 @@ package com.aiopenplatform.utils;
 
 import cn.hutool.core.util.StrUtil;
 import com.aiopenplatform.dto.UserDTO;
+import com.aiopenplatform.gateway.ApiPrincipal;
+import com.aiopenplatform.gateway.ApiPrincipalHolder;
+import com.aiopenplatform.gateway.PlatformService;
 import com.aiopenplatform.service.ITokenApiKeyService;
 import org.springframework.web.servlet.HandlerInterceptor;
 
@@ -19,15 +22,31 @@ import javax.servlet.http.HttpServletResponse;
 public class ApiKeyInterceptor implements HandlerInterceptor {
 
     private final ITokenApiKeyService apiKeyService;
+    private final PlatformService platformService;
 
-    public ApiKeyInterceptor(ITokenApiKeyService apiKeyService) {
+    public ApiKeyInterceptor(ITokenApiKeyService apiKeyService, PlatformService platformService) {
         this.apiKeyService = apiKeyService;
+        this.platformService = platformService;
     }
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
         String apiKey = request.getHeader("X-Api-Key");
+        if (StrUtil.isBlank(apiKey)) {
+            String authorization = request.getHeader("Authorization");
+            if (StrUtil.isNotBlank(authorization) && authorization.regionMatches(true, 0, "Bearer ", 0, 7)) {
+                apiKey = authorization.substring(7).trim();
+            }
+        }
         if (StrUtil.isNotBlank(apiKey)) {
+            ApiPrincipal principal = platformService.authenticate(apiKey);
+            if (principal != null) {
+                UserDTO user = new UserDTO();
+                user.setId(principal.getUserId());
+                UserHolder.saveUser(user);
+                ApiPrincipalHolder.set(principal);
+                return true;
+            }
             Long userId = apiKeyService.resolveUserId(apiKey);
             if (userId == null) {
                 response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
@@ -43,6 +62,15 @@ public class ApiKeyInterceptor implements HandlerInterceptor {
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             return false;
         }
+        if (request.getRequestURI().startsWith(request.getContextPath() + "/v1/")) {
+            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+            return false;
+        }
         return true;
+    }
+
+    @Override
+    public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) {
+        ApiPrincipalHolder.clear();
     }
 }

@@ -10,6 +10,9 @@ var api = {
     login: function (phone, code) {
         return http.post('/user/login', { phone: phone, code: code });
     },
+    adminLogin: function (username, password) {
+        return http.post('/admin/login', { username: username, password: password });
+    },
     me: function () {
         return http.get('/user/me');
     },
@@ -36,12 +39,32 @@ var api = {
         return http.get('/user-quota/me', { params: params });
     },
 
+    // ===== Credits =====
+    creditAccount: function () {
+        return http.get('/credits/account');
+    },
+    rechargeCredits: function (credits) {
+        return http.post('/credits/recharge', { credits: credits });
+    },
+    listCreditActivities: function () {
+        return http.get('/credit-activities');
+    },
+    claimCreditPackage: function (packageId) {
+        return http.post('/credit-activities/packages/' + packageId + '/claim');
+    },
+
     // ===== AI 开放平台 =====
     listModels: function () {
         return http.get('/ai/models');
     },
     chat: function (data) {
         return http.post('/ai/chat', data);
+    },
+    openAiModels: function (apiKey) {
+        return http.get('/v1/models', { headers: { 'X-Api-Key': apiKey } });
+    },
+    openAiChat: function (apiKey, data) {
+        return http.post('/v1/chat/completions', data, { headers: { 'X-Api-Key': apiKey } });
     },
     createApp: function (appName, description) {
         return http.post('/apps', { appName: appName, description: description });
@@ -83,5 +106,11 @@ var api = {
     },
     adminAdjustQuota: function (userId, modelId, amount, type) {
         return http.put('/admin/quota', { userId: userId, modelId: modelId, amount: amount, type: type });
+    },
+    adminCreditOverview: function () {
+        return http.get('/admin/credit-overview');
+    },
+    adminAiCallLogs: function (current, size) {
+        return http.get('/admin/ai-call-logs', { params: { current: current || 1, size: size || 10 } });
     }
 };

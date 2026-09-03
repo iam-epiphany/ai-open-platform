@@ -16,9 +16,10 @@
       <div class="topbar-right">
         <template v-if="logged">
           <a class="link" href="index.html">控制台</a>
+          <a class="link active" href="playground.html">模型调用</a>
           <a class="link" href="apps.html">API 管理</a>
           <a class="link" href="billing.html">账单</a>
-          <a class="link" href="orders.html">订单</a>
+          <a class="link" href="orders.html?v=nav-keep">订单</a>
           <a class="link" href="me.html">个人中心</a>
           <a class="link" v-if="isAdmin" href="admin.html">管理后台</a>
           <span class="nick">{{ me.nickName }}</span>
@@ -32,13 +33,18 @@
   </header>
 
   <main class="container">
-    <h2 class="page-title">🤖 模型调用 Playground（模拟计费）</h2>
+    <h2 class="page-title">🤖 模型调用 Playground</h2>
 
     <div class="chat-box">
       <el-form label-width="80px">
+        <el-form-item label="API Key">
+          <el-input v-model.trim="apiKey" type="password" show-password placeholder="输入 tok_ 开头的 App API Key" style="max-width:460px;" @change="loadModels"></el-input>
+          <el-button size="small" style="margin-left:8px;" @click="loadModels">加载模型</el-button>
+          <p style="margin:7px 0 0;font-size:12px;color:#909399;">密钥仅保存到当前浏览器会话；可在「API 管理」中新建密钥。</p>
+        </el-form-item>
         <el-form-item label="模型">
-          <el-select v-model="modelId" placeholder="请选择模型" style="width:280px;">
-            <el-option v-for="m in models" :key="m.modelId" :label="m.modelName" :value="m.modelId"></el-option>
+          <el-select v-model="model" placeholder="先加载可调用模型" style="width:280px;">
+            <el-option v-for="m in models" :key="m.id" :label="m.display_name || m.displayName || m.code" :value="m.code"></el-option>
           </el-select>
         </el-form-item>
         <el-form-item label="提示词">
@@ -51,7 +57,7 @@
         </el-form-item>
         <el-form-item label="输出上限">
           <el-input-number v-model="maxTokens" :min="16" :max="2048" :step="16" style="width:160px;"></el-input-number>
-          <span style="margin-left:10px;font-size:12px;color:#909399;">Tokens（估算输出长度，默认 256）</span>
+          <span style="margin-left:10px;font-size:12px;color:#909399;">max_tokens（实际 usage 将换算为 Credits）</span>
         </el-form-item>
         <el-form-item>
           <el-button type="primary" :loading="calling" @click="chat">调用模型</el-button>
@@ -63,13 +69,12 @@
     <!-- 本次调用结果 -->
     <div class="chat-box" v-if="result">
       <div class="panel-title">📨 回复内容</div>
-      <div class="chat-reply">{{ result.reply }}</div>
+      <div class="chat-reply">{{ result.content }}</div>
       <div class="usage-line">
-        <span>模型：<b>{{ result.modelName }}</b></span>
+        <span>模型：<b>{{ result.model }}</b></span>
         <span>输入：<b>{{ result.promptTokens }}</b> Tokens</span>
         <span>输出：<b>{{ result.completionTokens }}</b> Tokens</span>
-        <span>本次消耗：<b>{{ result.totalTokens }}</b> Tokens</span>
-        <span>扣费后余额：<b>{{ formatTokens(result.balanceAfter) }}</b></span>
+        <span>总计：<b>{{ result.totalTokens }}</b> Tokens</span>
       </div>
     </div>
 
@@ -77,8 +82,8 @@
     <div class="chat-box" v-if="history.length > 0">
       <div class="panel-title">🕘 本次会话调用记录（{{ history.length }} 次）</div>
       <div class="chat-reply" v-for="(h, i) in history" :key="i" style="margin-top:8px;font-size:13px;">
-        <div style="color:#909399;">[{{ h.time }}] {{ h.modelName }} · 消耗 {{ h.totalTokens }} Tokens · 余额 {{ formatTokens(h.balanceAfter) }}</div>
-        <div style="margin-top:6px;">{{ h.reply }}</div>
+        <div style="color:#909399;">[{{ h.time }}] {{ h.model }} · {{ h.totalTokens }} Tokens</div>
+        <div style="margin-top:6px;">{{ h.content }}</div>
       </div>
     </div>
   </main>
@@ -97,7 +102,8 @@
     data: function () {
       return {
         models: [],
-        modelId: null,
+        apiKey: sessionStorage.getItem('playgroundApiKey') || '',
+        model: '',
         prompt: '',
         maxTokens: 256,
         calling: false,
@@ -106,20 +112,16 @@
       };
     },
     created: function () {
-      var self = this;
-      var preset = new URLSearchParams(location.search).get('modelId');
-      api.listModels().then(function (res) {
-        self.models = res.data || [];
-        if (preset && self.models.length) {
-          var hit = self.models.filter(function (m) { return String(m.modelId) === preset; });
-          if (hit.length) self.modelId = hit[0].modelId;
-        }
-      }).catch(showError);
+      if (this.apiKey) this.loadModels();
     },
     methods: {
       chat: function () {
         var self = this;
-        if (!this.modelId) {
+        if (!this.apiKey) {
+          ELEMENT.Message.warning('请输入 API Key');
+          return;
+        }
+        if (!this.model) {
           ELEMENT.Message.warning('请先选择模型');
           return;
         }
@@ -128,19 +130,25 @@
           return;
         }
         this.calling = true;
-        api.chat({
-          modelId: this.modelId,
-          prompt: this.prompt,
-          maxTokens: this.maxTokens,
-          requestId: 'web-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)
+        api.openAiChat(this.apiKey, {
+          model: this.model,
+          messages: [{ role: 'user', content: this.prompt }],
+          max_tokens: this.maxTokens
         }).then(function (res) {
-          self.result = res.data;
+          var choice = (res.choices || [])[0] || {};
+          var usage = res.usage || {};
+          self.result = {
+            model: res.model,
+            content: choice.message ? choice.message.content : '',
+            promptTokens: usage.prompt_tokens || 0,
+            completionTokens: usage.completion_tokens || 0,
+            totalTokens: usage.total_tokens || 0
+          };
           self.history.unshift({
             time: formatTime(new Date()),
-            modelName: res.data.modelName,
-            totalTokens: res.data.totalTokens,
-            balanceAfter: res.data.balanceAfter,
-            reply: res.data.reply
+            model: self.result.model,
+            totalTokens: self.result.totalTokens,
+            content: self.result.content
           });
         }).catch(showError).then(function () {
           self.calling = false;
@@ -150,6 +158,15 @@
         this.prompt = '';
         this.result = null;
         this.history = [];
+      },
+      loadModels: function () {
+        var self = this;
+        if (!this.apiKey) return;
+        api.openAiModels(this.apiKey).then(function (res) {
+          self.models = res.data || [];
+          if (!self.model && self.models.length) self.model = self.models[0].code;
+          sessionStorage.setItem('playgroundApiKey', self.apiKey);
+        }).catch(showError);
       }
     }
   });

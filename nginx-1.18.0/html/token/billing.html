@@ -18,7 +18,8 @@
           <a class="link" href="index.html">控制台</a>
           <a class="link" href="playground.html">模型调用</a>
           <a class="link" href="apps.html">API 管理</a>
-          <a class="link" href="orders.html">订单</a>
+          <a class="link active" href="billing.html">账单</a>
+          <a class="link" href="orders.html?v=nav-keep">订单</a>
           <a class="link" href="me.html">个人中心</a>
           <a class="link" v-if="isAdmin" href="admin.html">管理后台</a>
           <span class="nick">{{ me.nickName }}</span>
@@ -33,6 +34,15 @@
 
   <main class="container" v-loading="loading">
     <h2 class="page-title">📊 账单中心</h2>
+
+    <div class="quota-card" style="background:linear-gradient(120deg,#183b6b,#2563a9);display:flex;justify-content:space-between;align-items:center;">
+      <div>
+        <div>可用 Credits</div>
+        <div class="balance">{{ formatTokens(creditAccount.balance) }}<span class="unit">Credits</span></div>
+        <div class="sub">冻结中 {{ formatTokens(creditAccount.frozenBalance) }} Credits · 模型调用将按实际 usage 结算</div>
+      </div>
+      <el-button type="primary" plain @click="rechargeVisible = true">充值 Credits</el-button>
+    </div>
 
     <!-- 用量总览 -->
     <div class="stat-grid">
@@ -125,6 +135,20 @@
             @current-change="loadRecords"></el-pagination>
       </div>
     </div>
+
+    <el-dialog title="模拟充值 Credits" :visible.sync="rechargeVisible" width="420px">
+      <p style="margin:0 0 16px;font-size:13px;color:#667085;line-height:1.7;">这是演示环境的模拟支付。提交后会立即增加账户余额并生成账本流水。</p>
+      <el-radio-group v-model="rechargeAmount" size="small">
+        <el-radio-button :label="1000">1,000</el-radio-button>
+        <el-radio-button :label="5000">5,000</el-radio-button>
+        <el-radio-button :label="10000">10,000</el-radio-button>
+      </el-radio-group>
+      <el-input-number v-model="rechargeAmount" :min="1" :max="10000000" :step="1000" style="width:100%;margin-top:16px;"></el-input-number>
+      <span slot="footer">
+        <el-button size="small" @click="rechargeVisible = false">取消</el-button>
+        <el-button size="small" type="primary" :loading="recharging" @click="recharge">确认充值</el-button>
+      </span>
+    </el-dialog>
   </main>
 </div>
 
@@ -147,7 +171,11 @@
         records: [],
         total: 0,
         current: 1,
-        changeType: ''
+        changeType: '',
+        creditAccount: { balance: 0, frozenBalance: 0 },
+        rechargeVisible: false,
+        rechargeAmount: 1000,
+        recharging: false
       };
     },
     created: function () {
@@ -157,13 +185,14 @@
       load: function () {
         var self = this;
         this.loading = true;
-        Promise.all([api.billingSummary(), api.billingDaily(7), api.billingRecords('', 1, 10)]).then(function (results) {
+        Promise.all([api.billingSummary(), api.billingDaily(7), api.billingRecords('', 1, 10), api.creditAccount()]).then(function (results) {
           self.summary = results[0].data || {};
           self.pools = self.summary.pools || [];
           self.daily = results[1].data || [];
           var rec = results[2];
           self.records = rec.data || [];
           self.total = rec.total || 0;
+          self.creditAccount = results[3].data || self.creditAccount;
         }).catch(showError).then(function () {
           self.loading = false;
         });
@@ -184,6 +213,17 @@
         if (max <= 0) return '2px';
         var pct = Math.max(4, Math.round(Number(tokens) / max * 100));
         return pct + '%';
+      },
+      recharge: function () {
+        var self = this;
+        this.recharging = true;
+        api.rechargeCredits(this.rechargeAmount).then(function (res) {
+          self.creditAccount.balance = res.data.balance;
+          self.rechargeVisible = false;
+          ELEMENT.Message.success('充值成功，已到账 ' + res.data.credits + ' Credits');
+        }).catch(showError).then(function () {
+          self.recharging = false;
+        });
       }
     }
   });

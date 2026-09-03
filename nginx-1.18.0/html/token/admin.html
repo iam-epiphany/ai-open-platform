@@ -19,7 +19,9 @@
           <a class="link" href="playground.html">模型调用</a>
           <a class="link" href="apps.html">API 管理</a>
           <a class="link" href="billing.html">账单</a>
+          <a class="link" href="orders.html?v=nav-keep">订单</a>
           <a class="link" href="me.html">个人中心</a>
+          <a class="link active" href="admin.html">管理后台</a>
           <span class="nick">{{ me.nickName }}</span>
           <el-button size="small" @click="logout">退出</el-button>
         </template>
@@ -36,28 +38,20 @@
     <!-- 平台总览 -->
     <div class="stat-grid">
       <div class="stat-card">
-        <div class="label">用户数</div>
-        <div class="value">{{ overview.userCount }}<span class="unit">人</span></div>
+        <div class="label">今日模型调用</div>
+        <div class="value">{{ overview.todayCallCount }}<span class="unit">次</span></div>
       </div>
       <div class="stat-card">
-        <div class="label">发放订单</div>
-        <div class="value">{{ overview.orderCount }}<span class="unit">单</span></div>
+        <div class="label">今日 Credits 消耗</div>
+        <div class="value">{{ formatTokens(overview.todayCreditCost) }}<span class="unit">Credits</span></div>
       </div>
       <div class="stat-card">
-        <div class="label">开放应用</div>
-        <div class="value">{{ overview.appCount }}<span class="unit">个</span></div>
+        <div class="label">用户 Credits 余额</div>
+        <div class="value">{{ formatTokens(overview.creditBalance) }}<span class="unit">Credits</span></div>
       </div>
       <div class="stat-card">
-        <div class="label">累计发放</div>
-        <div class="value">{{ formatTokens(overview.grantTotal) }}<span class="unit">Tokens</span></div>
-      </div>
-      <div class="stat-card">
-        <div class="label">累计消耗</div>
-        <div class="value">{{ formatTokens(overview.consumeTotal) }}<span class="unit">Tokens</span></div>
-      </div>
-      <div class="stat-card">
-        <div class="label">模型调用</div>
-        <div class="value">{{ overview.callCount }}<span class="unit">次</span></div>
+        <div class="label">模型调用排行</div>
+        <div style="font-size:13px;margin-top:10px;line-height:1.8;">{{ modelRankingText }}</div>
       </div>
     </div>
 
@@ -103,18 +97,18 @@
 
     <!-- 调用日志 -->
     <div class="panel" style="margin-bottom:20px;">
-      <div class="panel-title">📞 模型调用日志</div>
+      <div class="panel-title">📞 Credits 模型调用日志</div>
       <el-table :data="callLogs" size="mini" style="width:100%">
         <el-table-column prop="id" label="日志 ID" width="170" class-name="mono"></el-table-column>
         <el-table-column prop="userId" label="用户" width="80"></el-table-column>
-        <el-table-column prop="modelName" label="模型" width="120"></el-table-column>
+        <el-table-column prop="model" label="模型" width="120"></el-table-column>
         <el-table-column prop="promptTokens" label="输入" width="70"></el-table-column>
         <el-table-column prop="completionTokens" label="输出" width="70"></el-table-column>
-        <el-table-column prop="totalTokens" label="总消耗" width="90"></el-table-column>
-        <el-table-column label="渠道" width="110">
+        <el-table-column prop="creditCost" label="Credits" width="90"></el-table-column>
+        <el-table-column label="状态" width="90">
           <template slot-scope="scope">
-            <el-tag size="mini" :type="scope.row.channel === 1 ? 'primary' : 'warning'">
-              {{ scope.row.channel === 1 ? 'Playground' : 'API Key' }}
+            <el-tag size="mini" :type="scope.row.status === 1 ? 'success' : 'danger'">
+              {{ scope.row.status === 1 ? '成功' : '失败' }}
             </el-tag>
           </template>
         </el-table-column>
@@ -231,7 +225,7 @@
       load: function () {
         var self = this;
         this.loading = true;
-        Promise.all([api.adminOverview(), api.adminSkus(), api.adminCallLogs(1, 10)]).then(function (results) {
+        Promise.all([api.adminCreditOverview(), api.adminSkus(), api.adminAiCallLogs(1, 10)]).then(function (results) {
           self.overview = results[0].data || {};
           self.skus = results[1].data || [];
           self.callLogs = (results[2].data) || [];
@@ -242,7 +236,7 @@
       },
       loadCallLogs: function () {
         var self = this;
-        api.adminCallLogs(this.logCurrent, 10).then(function (res) {
+        api.adminAiCallLogs(this.logCurrent, 10).then(function (res) {
           self.callLogs = res.data || [];
           self.callLogTotal = res.total || 0;
         }).catch(showError);
@@ -290,6 +284,12 @@
           }).catch(showError).then(function () {
             self.adjusting = false;
           });
+      }
+    },
+    computed: {
+      modelRankingText: function () {
+        var list = this.overview.modelRanking || [];
+        return list.length ? list.map(function (item) { return item.model + ' · ' + item.call_count + ' 次'; }).join(' / ') : '暂无调用';
       }
     }
   });

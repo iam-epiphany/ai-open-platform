@@ -114,6 +114,7 @@ var topbarMixin = {
         },
         logout: function () {
             sessionStorage.removeItem('token');
+            sessionStorage.removeItem('playgroundApiKey');
             location.reload();
         }
     }

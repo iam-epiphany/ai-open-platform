@@ -17,7 +17,7 @@ import java.util.UUID;
 @RequestMapping("upload")
 public class UploadController {
 
-    @PostMapping("blog")
+    @PostMapping("image")
     public Result uploadImage(@RequestParam("file") MultipartFile image) {
         try {
             // 获取原始文件名称
@@ -34,9 +34,8 @@ public class UploadController {
         }
     }
 
-    @GetMapping("/blog/delete")
-    public Result deleteBlogImg(@RequestParam("name") String filename) {
-        // 路径示例: /imgs/blogs/0/a/uuid.jpg → 去掉 /imgs 前缀，得到 /blogs/0/a/uuid.jpg
+    @GetMapping("/image/delete")
+    public Result deleteImage(@RequestParam("name") String filename) {
         String relativePath = filename.replaceFirst("^/imgs", "");
         File file = new File(SystemConstants.getImageUploadDir(), relativePath);
         if (file.isDirectory()) {
@@ -49,17 +48,17 @@ public class UploadController {
     private String createNewFileName(String originalFilename) {
         // 获取后缀
         String suffix = StrUtil.subAfter(originalFilename, ".", true);
-        // 生成目录
+        // 按哈希分散目录，避免单目录文件过多
         String name = UUID.randomUUID().toString();
         int hash = name.hashCode();
         int d1 = hash & 0xF;
         int d2 = (hash >> 4) & 0xF;
         // 判断目录是否存在
-        File dir = new File(SystemConstants.getImageUploadDir(), StrUtil.format("/blogs/{}/{}", d1, d2));
+        File dir = new File(SystemConstants.getImageUploadDir(), StrUtil.format("/uploads/{}/{}", d1, d2));
         if (!dir.exists()) {
             dir.mkdirs();
         }
         // 生成文件名
-        return StrUtil.format("/blogs/{}/{}/{}.{}", d1, d2, name, suffix);
+        return StrUtil.format("/uploads/{}/{}/{}.{}", d1, d2, name, suffix);
     }
 }

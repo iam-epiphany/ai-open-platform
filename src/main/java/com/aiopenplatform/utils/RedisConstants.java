@@ -8,22 +8,11 @@ public class RedisConstants {
 
     public static final Long CACHE_NULL_TTL = 2L;
 
-    public static final Long CACHE_SHOP_TTL = 30L;
-    public static final Long CACHE_SHOP_TYPE_TTL = 120L;
-    public static final String CACHE_SHOP_KEY = "cache:shop:";
-    public static final String CACHE_SHOP_TYPE_KEY = "cache:shopType";
-    /** 热点笔记缓存 key + TTL */
-    public static final String CACHE_BLOG_KEY = "cache:blog:";
-    public static final Long CACHE_BLOG_TTL = 30L;
-
-
-    public static final String LOCK_SHOP_KEY = "lock:shop:";
+    public static final String LOCK_CACHE_REBUILD_KEY = "lock:cache:rebuild:";
+    /** User sign-in bitmap; kept as an account-level utility, unrelated to the removed social modules. */
+    public static final String USER_SIGN_KEY = "sign:";
     public static final Long LOCK_SHOP_TTL = 10L;
 
-    public static final String BLOG_LIKED_KEY = "blog:liked:";
-    public static final String FEED_KEY = "feed:";
-    public static final String SHOP_GEO_KEY = "shop:geo:";
-    public static final String USER_SIGN_KEY = "sign:";
 
     //============ Token 平台业务 ============
     /** SKU 详情缓存 key：token:sku:{skuId}（多级缓存 L2/L3） */

@@ -4,6 +4,7 @@ import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.StrUtil;
 import com.aiopenplatform.dto.Result;
 import com.aiopenplatform.dto.UserDTO;
+import com.aiopenplatform.gateway.PlatformService;
 import com.aiopenplatform.entity.TokenApp;
 import com.aiopenplatform.entity.TokenApiKey;
 import com.aiopenplatform.service.ITokenAppService;
@@ -41,6 +42,8 @@ public class AppController {
     private ITokenAppService appService;
     @Resource
     private ITokenApiKeyService apiKeyService;
+    @Resource
+    private PlatformService platformService;
 
     /**
      * 创建应用（自动生成第一个 API Key，明文仅此一次返回）
@@ -55,7 +58,12 @@ public class AppController {
         if (appName.length() > 32) {
             return Result.fail("应用名称过长（最多 32 字）");
         }
-        Map<String, Object> data = appService.createApp(user.getId(), appName.trim(), body.get("description"));
+        Map<String, Object> data;
+        try {
+            data = platformService.createApp(user.getId(), appName.trim(), body.get("description"));
+        } catch (IllegalArgumentException e) {
+            return Result.fail(e.getMessage());
+        }
         data.put("tip", "密钥仅显示一次，请立即复制保存");
         return Result.ok(data);
     }
@@ -66,15 +74,7 @@ public class AppController {
     @GetMapping
     public Result listApps() {
         UserDTO user = UserHolder.getUser();
-        List<TokenApp> apps = appService.listByUser(user.getId());
-        List<Map<String, Object>> data = new ArrayList<>();
-        for (TokenApp app : apps) {
-            Map<String, Object> item = new HashMap<>();
-            item.put("app", BeanUtil.beanToMap(app));
-            item.put("keys", apiKeyService.listByApp(app.getId()));
-            data.add(item);
-        }
-        return Result.ok(data);
+        return Result.ok(platformService.listApps(user.getId()));
     }
 
     /**
@@ -83,11 +83,12 @@ public class AppController {
     @PostMapping("/{id}/keys")
     public Result createKey(@PathVariable("id") Long appId) {
         UserDTO user = UserHolder.getUser();
-        TokenApp app = appService.getById(appId);
-        if (app == null || !app.getUserId().equals(user.getId())) {
-            return Result.fail("应用不存在");
+        String plain;
+        try {
+            plain = platformService.createKeyForUser(appId, user.getId());
+        } catch (IllegalArgumentException e) {
+            return Result.fail(e.getMessage());
         }
-        String plain = apiKeyService.generateKey(appId, user.getId());
         Map<String, Object> data = new HashMap<>();
         data.put("apiKeyPlain", plain);
         data.put("apiKey", plain);
@@ -105,7 +106,7 @@ public class AppController {
         if (status == null || (status != 0 && status != 1)) {
             return Result.fail("状态参数错误");
         }
-        boolean ok = apiKeyService.toggleStatus(keyId, user.getId(), status);
+        boolean ok = platformService.setKeyStatus(keyId, user.getId(), status);
         return ok ? Result.ok() : Result.fail("密钥不存在");
     }
 
@@ -115,7 +116,7 @@ public class AppController {
     @DeleteMapping("/{id}")
     public Result deleteApp(@PathVariable("id") Long appId) {
         UserDTO user = UserHolder.getUser();
-        boolean ok = appService.deleteApp(appId, user.getId());
+        boolean ok = platformService.deleteApp(appId, user.getId());
         return ok ? Result.ok() : Result.fail("应用不存在");
     }
 }

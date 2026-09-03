@@ -19,7 +19,8 @@
           <a class="link" href="playground.html">模型调用</a>
           <a class="link" href="apps.html">API 管理</a>
           <a class="link" href="billing.html">账单</a>
-          <a class="link" href="orders.html">订单</a>
+          <a class="link" href="orders.html?v=nav-keep">订单</a>
+          <a class="link active" href="me.html">个人中心</a>
           <a class="link" v-if="isAdmin" href="admin.html">管理后台</a>
           <span class="nick">{{ me.nickName }}</span>
           <el-button size="small" @click="logout">退出</el-button>
@@ -41,6 +42,13 @@
         <div class="user-name">{{ me.nickName }}</div>
         <div class="user-id">ID: {{ me.id }}</div>
       </div>
+    </div>
+
+    <div class="quota-card" style="background:linear-gradient(120deg,#183b6b,#2563a9);">
+      <div>Credits 账户</div>
+      <div class="balance">{{ formatTokens(creditAccount.balance) }}<span class="unit">Credits</span></div>
+      <div class="sub">冻结中 {{ formatTokens(creditAccount.frozenBalance) }} Credits</div>
+      <el-button type="primary" plain size="small" style="margin-top:14px;" @click="goBilling">充值与查看账单</el-button>
     </div>
 
     <div class="quota-card" v-for="q in quotas" :key="q.modelId">
@@ -79,7 +87,8 @@
     data: function () {
       return {
         loading: false,
-        quotas: []
+        quotas: [],
+        creditAccount: { balance: 0, frozenBalance: 0 }
       };
     },
     computed: {
@@ -100,7 +109,9 @@
         var self = this;
         this.loading = true;
         // 额度池 = 通用池(0) + 在售活动涉及的所有 modelId
-        api.listActivities().then(function (res) {
+        Promise.all([api.creditAccount(), api.listActivities()]).then(function (data) {
+          self.creditAccount = data[0].data || self.creditAccount;
+          var res = data[1];
           var ids = [0];
           var names = { 0: '通用额度池（model 0）' };
           (res.data || []).forEach(function (item) {
@@ -124,6 +135,9 @@
         }).catch(showError).then(function () {
           self.loading = false;
         });
+      },
+      goBilling: function () {
+        location.href = '/billing.html';
       }
     }
   });

@@ -2,6 +2,7 @@ package com.aiopenplatform.config;
 
 import com.aiopenplatform.cache.ScopeCacheInterceptor;
 import com.aiopenplatform.service.ITokenApiKeyService;
+import com.aiopenplatform.gateway.PlatformService;
 import com.aiopenplatform.utils.ApiKeyInterceptor;
 import com.aiopenplatform.utils.BlackListInterceptor;
 import com.aiopenplatform.utils.LoginInterceptor;
@@ -33,9 +34,12 @@ public class MvcConfig implements WebMvcConfigurer {
     @Autowired
     private ITokenApiKeyService apiKeyService;
 
+    @Autowired
+    private PlatformService platformService;
+
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
-        // 将 /imgs/** 请求映射到文件系统的图片目录，覆盖 blogs、icons 等所有子目录
+        // 将 /imgs/** 请求映射到文件系统的图片目录
         registry.addResourceHandler("/imgs/**")
                 .addResourceLocations("file:" + new File(uploadDir).getAbsolutePath() + File.separator);
     }
@@ -57,18 +61,17 @@ public class MvcConfig implements WebMvcConfigurer {
                 .excludePathPatterns(
                         "/user/login",
                         "/user/code",
-                        "/blog/hot",
-                        "/shop/**",
-                        "/shop-type/**",
+                        "/admin/login",
                         "/upload/**",
                         "/token-sku/**",
                         "/token-activity/**",
                         "/ai/**",
+                        "/v1/**",
                         "/imgs/**"
                 ).order(3);
         //5.AI 开放接口鉴权拦截器：/ai/** 双通道（登录态或 X-Api-Key）；模型目录公开放行
-        registry.addInterceptor(new ApiKeyInterceptor(apiKeyService))
-                .addPathPatterns("/ai/**")
+        registry.addInterceptor(new ApiKeyInterceptor(apiKeyService, platformService))
+                .addPathPatterns("/ai/**", "/v1/**")
                 .excludePathPatterns("/ai/models")
                 .order(4);
     }
