@@ -25,6 +25,8 @@ http.interceptors.response.use(function (response) {
     return result;
 }, function (error) {
     var resp = error.response;
+    // 优先展示服务端返回的可读错误信息。
+    var responseMessage = resp && resp.data && (resp.data.errorMsg || resp.data.message || (resp.data.error && resp.data.error.message));
     if (resp && resp.status === 401) {
         // API Key 校验失败不是网站登录失效，不应该强制跳转。
         if (error.config && (error.config.headers['X-Api-Key'] || String(error.config.url || '').indexOf('/v1/') >= 0)) {
@@ -44,16 +46,15 @@ http.interceptors.response.use(function (response) {
         return Promise.reject(new Error('账号已被限制访问，请稍后再试'));
     }
     if (resp && resp.status === 404) {
-        return Promise.reject(new Error('接口不存在，请确认 Java 后端已重启并运行最新代码'));
+        return Promise.reject(new Error(responseMessage || '请求的接口不存在，请联系管理员'));
     }
     if (resp && resp.status >= 500) {
-        return Promise.reject(new Error('服务器处理失败，请查看后端日志'));
+        return Promise.reject(new Error(responseMessage || '服务器异常，请稍后再试'));
     }
     if (error.code === 'ECONNABORTED') {
         return Promise.reject(new Error('请求超时，请确认后端服务正常运行'));
     }
-    var detail = resp && resp.data && (resp.data.errorMsg || resp.data.message || (resp.data.error && resp.data.error.message));
-    return Promise.reject(new Error(detail || (resp ? '请求失败（HTTP ' + resp.status + '）' : '无法连接后端服务')));
+    return Promise.reject(new Error(responseMessage || (resp ? '请求失败（HTTP ' + resp.status + '）' : '无法连接后端服务')));
 });
 
 /** 统一错误提示 */
