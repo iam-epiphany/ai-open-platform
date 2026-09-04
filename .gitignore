@@ -57,3 +57,4 @@ jmeter/tokens.csv
 
 # 本地运行日志与临时文件
 tmp/
+jmeter/out/

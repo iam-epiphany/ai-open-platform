@@ -51,6 +51,18 @@ jmeter -n -t token-grant-stress.jmx -l results.jtl -e -o report `
 | `setup/prepare-stress-data.sh` | 幂等造数：压测 SKU(1001/1002/1004)+活动、3000 用户、800 个 API Key+余额、Redis 登录态、`data/*.csv`（**注意**：`data/` 为生成目录不入库，重跑本脚本即可再生成） |
 | `setup/soak-orchestrate.sh` | S7 半小时 soak 一键编排（含第 10 分钟 1000 人抢购 + kill 应用 60s 的补偿验证） |
 
+## 2026-09-04 极限压测脚本（详见 docs/压测报告-2026-09-04.md）
+
+| 脚本 | 用途 |
+| --- | --- |
+| `setup/prepare-limit-data.sh` | 极限造数（幂等）：SKU 1010(stock=10k,限1)/1011(5k,1)/1012(20k,限1k) + 12,500 用户（5010001~5022500，登录态+独立 IP），产出 `data/grant-limit-1010/1011/1012.csv`；**运行前需停止应用**（脚本会清空发放 Stream） |
+| `token-grant-capacity.jmx` | 抢购入口容量平台：N 线程持续施压（`-Jthreads/-Jduration` 参数化），CSV 用户轮转 + 每请求随机 XFF |
+| `verify-limit.sql` | 1010/1011/1012 终态一致性校验（订单/重复/账本对账/冻结/库存） |
+
+**执行注意（2026-09-04 实测修正）**：
+- 采样器实现必须用 Java：`-Jjmeter.httpsampler=Java`——HttpClient4 在本机不复用连接，会把 Windows 16,384 个动态端口耗尽并产生 BindException 洪水（非服务端问题）。
+- `/v1` 施压前确认 shell **不带 `DEEPSEEK_API_KEY`**（真实 Key 会打到 DeepSeek 上游而非本地 fast-path）；测试专用 RPM 上限可用 `--ai.limits.rpm-per-key=1000000` 启动应用。
+
 压测要点速记：
 
 - 全链路一致性断言：`tb_token_order` 订单数 ≤ 初始库存、同用户同 SKU 无重复、`tb_token_sku.stock` 与 Redis `token:stock:<skuId>` 终值一致、`tb_credit_ledger` ACTIVITY_GRANT 行数与总额对账、冻结恒为 0、Stream `XPENDING` 归 0。

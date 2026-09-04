@@ -32,12 +32,12 @@ DATA_DIR="$HERE/../data"
 mkdir -p "$DATA_DIR"
 SCRATCH="$(mktemp)"
 
-rndhex() { od -An -N16 -tx1 /dev/urandom | tr -d ' \n'; }
+rndhex() { printf '%04x%04x%04x%04x%04x%04x%04x%04x' $RANDOM $RANDOM $RANDOM $RANDOM $RANDOM $RANDOM $RANDOM $RANDOM; }
 
 echo "[1/6] 清理压测残留 + SKU 与活动（重建 1001/1002/1004）"
 docker exec -i "$MYSQL_CONT" mysql -uroot -p"$MYSQL_PWD" --default-character-set=utf8mb4 "$DB" <<'SQL'
 -- 清掉上次压测产生的：发放账本（按订单号关联）、订单、账户、调用审计
-DELETE l FROM tb_credit_ledger l JOIN tb_token_order o ON l.reference_no=o.id
+DELETE l FROM tb_credit_ledger l JOIN tb_token_order o ON l.reference_no = CAST(o.id AS CHAR)
   WHERE o.sku_id IN (1001,1002,1004) AND l.change_type='ACTIVITY_GRANT';
 DELETE FROM tb_token_order WHERE sku_id IN (1001,1002,1004);
 DELETE FROM tb_credit_account WHERE user_id BETWEEN 5000001 AND 5003000;
