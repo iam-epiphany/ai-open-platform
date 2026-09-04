@@ -6,27 +6,30 @@ import com.aiopenplatform.service.ITokenOrderService.GrantResult;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.RedisSystemException;
 import org.springframework.data.redis.connection.stream.Consumer;
 import org.springframework.data.redis.connection.stream.MapRecord;
+import org.springframework.data.redis.connection.stream.ReadOffset;
 import org.springframework.data.redis.connection.stream.RecordId;
 import org.springframework.data.redis.connection.stream.StreamReadOptions;
 import org.springframework.data.redis.connection.stream.StreamOffset;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import javax.annotation.PostConstruct;
+import javax.annotation.PreDestroy;
 import javax.annotation.Resource;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 import static com.aiopenplatform.utils.RedisConstants.TOKEN_COUNT_TTL;
-import static com.aiopenplatform.utils.RedisConstants.TOKEN_GRANT_CONSUMER;
 import static com.aiopenplatform.utils.RedisConstants.TOKEN_GRANT_GROUP;
 import static com.aiopenplatform.utils.RedisConstants.TOKEN_GRANT_STREAM_KEY;
 
@@ -44,7 +47,9 @@ import static com.aiopenplatform.utils.RedisConstants.TOKEN_GRANT_STREAM_KEY;
  *     <li><b>库存校正</b>：回滚 Redis 预扣按失败原因区分——重复领取等「DB 未扣减」场景 +1 精确归还；
  *     库存不足等「DB 已无货」场景把 Redis 库存 SET 为 DB 实际值，避免幻影库存被反复误售；</li>
  *     <li><b>可恢复异常即时重试</b>：DB/Redis 瞬时故障在进程内退避重试 {@link #MAX_ATTEMPTS} 次
- *     后才抛出交给补偿器；consume 单条隔离，一条消息的瞬时异常不拖慢同批其余消息。</li>
+ *     后才抛出交给补偿器；单条失败不拖慢同批其余消息；</li>
+ *     <li><b>并发扩展</b>：{@code token.grant.workers}（默认 1）个轮询工作线程并行处理，
+ *     组内消费名自动编号 c1..cN 分摊消息；默认单线程时与旧版行为一致。</li>
  * </ul>
  * </p>
  */
@@ -56,6 +61,16 @@ public class TokenGrantConsumer {
     private static final int MAX_ATTEMPTS = 3;
     /** 各次重试之间的退避毫秒数（第 i 次失败后等待 BACKOFF_MS[i]） */
     private static final long[] BACKOFF_MS = {500L, 2000L};
+    /** 单工作线程轮询间隔（与轮询一批的处理时长构成 fixed-delay） */
+    private static final long POLL_INTERVAL_MS = 150L;
+    /** 单轮最大拉取条数 */
+    private static final int POLL_BATCH_SIZE = 10;
+
+    /** 并行发放工作线程数（默认 1：单消费者，消费名 token-grant-c1，行为与旧版一致） */
+    @Value("${token.grant.workers:1}")
+    private int grantWorkers;
+
+    private ScheduledExecutorService workerPool;
 
     @Resource
     private ITokenOrderService tokenOrderService;
@@ -73,10 +88,39 @@ public class TokenGrantConsumer {
     }
 
     /**
-     * 启动时创建 Stream 消费组（stream 不存在时先插入占位消息再建组）
+     * 启动：确保 Stream 消费组存在后，按 {@code token.grant.workers} 启动 N 个并行轮询工作线程
      */
     @PostConstruct
-    public void initStreamGroup() {
+    public void startWorkers() {
+        initStreamGroup();
+        int workers = Math.max(1, grantWorkers);
+        workerPool = Executors.newScheduledThreadPool(workers, runnable -> {
+            Thread thread = new Thread(runnable, "token-grant-worker");
+            thread.setDaemon(true);
+            return thread;
+        });
+        for (int i = 1; i <= workers; i++) {
+            // 组内多消费者并行分摊消息（pending 归属互不影响）；
+            // c1 与常量 TOKEN_GRANT_CONSUMER("token-grant-c1") 同名，兼容历史 pending 归属
+            final String consumerName = "token-grant-c" + i;
+            workerPool.scheduleWithFixedDelay(() -> pollOnce(consumerName),
+                    5000L + (i - 1) * 100L, POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);
+        }
+        log.info("已启动 Token 发放轮询工作线程: workers={}, group={}", workers, TOKEN_GRANT_GROUP);
+    }
+
+    @PreDestroy
+    public void stopWorkers() {
+        if (workerPool != null) {
+            workerPool.shutdownNow();
+            log.info("Token 发放轮询工作线程已停止");
+        }
+    }
+
+    /**
+     * 创建 Stream 消费组（stream 不存在时先插入占位消息再建组）
+     */
+    private void initStreamGroup() {
         try {
             stringRedisTemplate.opsForStream().createGroup(TOKEN_GRANT_STREAM_KEY, TOKEN_GRANT_GROUP);
             log.info("已创建 Stream 消费组: group={}", TOKEN_GRANT_GROUP);
@@ -99,31 +143,35 @@ public class TokenGrantConsumer {
     }
 
     /**
-     * 轮询拉取新消息并处理（XREADGROUP），处理成功后手动 XACK；
+     * 单轮拉取并处理（XREADGROUP），处理成功后手动 XACK；
      * 单条失败仅记录并跳过，不中断同批其余消息（失败消息不 ACK、留在 pending-list，
      * 由 {@link GrantPendingCompensator} 认领重试）
      */
-    @Scheduled(fixedDelay = 150, initialDelay = 5000)
-    public void consume() {
-        List<MapRecord<String, Object, Object>> records = stringRedisTemplate.opsForStream().read(
-                Consumer.from(TOKEN_GRANT_GROUP, TOKEN_GRANT_CONSUMER),
-                StreamReadOptions.empty().count(10),
-                StreamOffset.create(TOKEN_GRANT_STREAM_KEY, org.springframework.data.redis.connection.stream.ReadOffset.lastConsumed()));
-        if (records == null || records.isEmpty()) {
-            return;
-        }
-        for (MapRecord<String, Object, Object> record : records) {
-            try {
-                Map<Object, Object> value = record.getValue();
-                Long orderId = Long.valueOf(String.valueOf(value.get("orderId")));
-                Long skuId = Long.valueOf(String.valueOf(value.get("skuId")));
-                Long userId = Long.valueOf(String.valueOf(value.get("userId")));
-                int limitCount = Integer.parseInt(String.valueOf(value.get("limitCount")));
-                processRecord(record.getId().getValue(), orderId, skuId, userId, limitCount);
-            } catch (Exception e) {
-                // 不 ACK：消息留在 pending-list 由补偿器稍后认领；本批其余消息继续处理
-                log.error("发放消息处理失败（保留 pending 待补偿）: messageId={}", record.getId().getValue(), e);
+    private void pollOnce(String consumerName) {
+        try {
+            List<MapRecord<String, Object, Object>> records = stringRedisTemplate.opsForStream().read(
+                    Consumer.from(TOKEN_GRANT_GROUP, consumerName),
+                    StreamReadOptions.empty().count(POLL_BATCH_SIZE),
+                    StreamOffset.create(TOKEN_GRANT_STREAM_KEY, ReadOffset.lastConsumed()));
+            if (records == null || records.isEmpty()) {
+                return;
             }
+            for (MapRecord<String, Object, Object> record : records) {
+                try {
+                    Map<Object, Object> value = record.getValue();
+                    Long orderId = Long.valueOf(String.valueOf(value.get("orderId")));
+                    Long skuId = Long.valueOf(String.valueOf(value.get("skuId")));
+                    Long userId = Long.valueOf(String.valueOf(value.get("userId")));
+                    int limitCount = Integer.parseInt(String.valueOf(value.get("limitCount")));
+                    processRecord(record.getId().getValue(), orderId, skuId, userId, limitCount);
+                } catch (Exception e) {
+                    // 不 ACK：消息留在 pending-list 由补偿器稍后认领；本批其余消息继续处理
+                    log.error("发放消息处理失败（保留 pending 待补偿）: messageId={}", record.getId().getValue(), e);
+                }
+            }
+        } catch (Exception e) {
+            // scheduleWithFixedDelay 在任务抛异常后会静默停止后续调度，必须顶层兜底
+            log.warn("轮询发放消息失败（下一轮自动重试）: err={}", e.getMessage());
         }
     }
 
