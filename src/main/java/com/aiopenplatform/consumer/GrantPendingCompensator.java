@@ -26,8 +26,9 @@ import static com.aiopenplatform.utils.RedisConstants.TOKEN_GRANT_STREAM_KEY;
  * <p>
  * 消费端处理失败不 ACK 的消息会滞留 pending-list；
  * 本任务周期性扫描，认领（XCLAIM）闲置超过阈值的消息重新处理；
- * 同一消息投递超过 {@link #MAX_DELIVERY} 次仍失败则回滚 Redis 预扣后 ACK 丢弃
- * （死信留痕），防止无限重试，也避免预扣库存与用户领取标记永久泄漏。
+ * 同一消息投递超过 {@link #MAX_DELIVERY} 次仍失败则视为死信：若订单确未发放，
+ * 先落 status=2 失败订单留痕（用户可见、可对账退款，不静默丢弃），
+ * 再回滚 Redis 预扣后 ACK，防止预扣库存与用户领取标记永久泄漏。
  * </p>
  */
 @Slf4j
@@ -36,8 +37,8 @@ public class GrantPendingCompensator {
 
     /** 补偿阈值：pending 消息闲置超过该时长（秒）才认领 */
     private static final long MIN_IDLE_SECONDS = 60;
-    /** 单条消息最大投递次数，超过则视为死信 */
-    private static final int MAX_DELIVERY = 3;
+    /** 单条消息最大投递次数，超过则视为死信（每次投递内含消费端最多 3 次即时重试，故放宽到 5） */
+    private static final int MAX_DELIVERY = 5;
 
     @Resource
     private StringRedisTemplate stringRedisTemplate;
@@ -79,26 +80,36 @@ public class GrantPendingCompensator {
                     continue;
                 }
                 for (ByteRecord record : claimed) {
-                    // ByteRecord 转字段（StringRedisTemplate 值本就是字符串）
-                    Map<Object, Object> value = new HashMap<>();
-                    record.getValue().forEach((k, v) -> value.put(new String(k), new String(v)));
-                    Long orderId = Long.valueOf(String.valueOf(value.get("orderId")));
-                    Long skuId = Long.valueOf(String.valueOf(value.get("skuId")));
-                    Long userId = Long.valueOf(String.valueOf(value.get("userId")));
-                    int limitCount = Integer.parseInt(String.valueOf(value.get("limitCount")));
-                    retryOrDeadLetter(msg, record.getId().getValue(), orderId, skuId, userId, limitCount);
+                    try {
+                        // ByteRecord 转字段（StringRedisTemplate 值本就是字符串）
+                        Map<Object, Object> value = new HashMap<>();
+                        record.getValue().forEach((k, v) -> value.put(new String(k), new String(v)));
+                        Long orderId = Long.valueOf(String.valueOf(value.get("orderId")));
+                        Long skuId = Long.valueOf(String.valueOf(value.get("skuId")));
+                        Long userId = Long.valueOf(String.valueOf(value.get("userId")));
+                        int limitCount = Integer.parseInt(String.valueOf(value.get("limitCount")));
+                        retryOrDeadLetter(msg, record.getId().getValue(), orderId, skuId, userId, limitCount);
+                    } catch (Exception e) {
+                        // 单条补偿失败：保留 pending 等下一轮，不中断同批其余消息
+                        log.warn("补偿重试仍失败，等待下一轮: messageId={}, err={}",
+                                record.getId().getValue(), e.getMessage());
+                    }
                 }
             } catch (Exception e) {
-                // 补偿重试仍失败：保留在 pending-list，等待下一轮
-                log.warn("补偿重试仍失败，等待下一轮: messageId={}, err={}", msg.getId().getValue(), e.getMessage());
+                // XCLAIM 等批量操作失败：保留在 pending-list，等待下一轮
+                log.warn("补偿认领失败，等待下一轮: messageId={}, err={}", msg.getId().getValue(), e.getMessage());
             }
         }
     }
 
     /**
-     * 认领后重新处理；投递次数超限仍失败时回滚 Redis 预扣并 ACK（死信）。
-     * <p>
-     * 回滚以 orderId 幂等（SETNX 标记），与消费侧正常回滚共用同一脚本，
+     * 认领后重新处理；投递次数超限仍失败时判死信：
+     * <ul>
+     *     <li>订单已发放成功（此前成功、仅 ACK 失败）：直接 ACK 丢弃；</li>
+     *     <li>订单确未发放：先记录 status=2 失败订单（留痕供用户可见/退款对账），
+     *     再回滚 Redis 预扣（+1 精确归还，死信原因不可判定时不得按 DB 值覆盖）并 ACK。</li>
+     * </ul>
+     * 回滚以 orderId 幂等（SETNX 标记），与消费侧回滚共用同一脚本，
      * 不会因重试路径重叠而重复恢复库存。
      */
     private void retryOrDeadLetter(PendingMessage msg, String messageId, Long orderId, Long skuId, Long userId, int limitCount) {
@@ -110,16 +121,18 @@ public class GrantPendingCompensator {
                         messageId, msg.getTotalDeliveryCount(), e.getMessage());
                 return;
             }
-            // 死信：若订单已落库（此前发放成功、仅 ACK 失败），直接 ACK 丢弃即可；
-            // 否则先回滚 Redis 预扣再 ACK，保证库存与领取标记不泄漏
-            if (tokenGrantConsumer.orderExists(orderId)) {
+            // 死信：若订单此前已发放成功（仅 ACK 失败），直接 ACK 丢弃即可
+            if (tokenGrantConsumer.orderGranted(orderId)) {
                 stringRedisTemplate.opsForStream().acknowledge(TOKEN_GRANT_STREAM_KEY, TOKEN_GRANT_GROUP, messageId);
                 log.warn("死信订单已发放，直接 ACK 丢弃: messageId={}, orderId={}", messageId, orderId);
                 return;
             }
-            tokenGrantConsumer.rollbackGrant(orderId, skuId, userId, limitCount);
+            // 订单确未发放：先失败订单留痕（DB 不可达时抛异常 → 本轮不 ACK、消息保留下轮重试），
+            // 再回滚预扣 + ACK——用户抢购已成功却拿不到 Token 时必须可见、可退款，不能静默丢失
+            tokenGrantConsumer.recordFailedOrder(orderId, skuId, userId);
+            tokenGrantConsumer.rollbackGrant(orderId, skuId, userId, limitCount, null);
             stringRedisTemplate.opsForStream().acknowledge(TOKEN_GRANT_STREAM_KEY, TOKEN_GRANT_GROUP, messageId);
-            log.error("发放消息投递 {} 次仍失败，已回滚预扣并 ACK 丢弃（死信）: messageId={}, orderId={}",
+            log.error("发放消息投递 {} 次仍失败，已留痕失败订单并回滚预扣后 ACK（死信）: messageId={}, orderId={}",
                     msg.getTotalDeliveryCount(), messageId, orderId);
         }
     }

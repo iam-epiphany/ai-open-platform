@@ -71,7 +71,7 @@ CREATE TABLE `tb_token_order` (
   `user_id` bigint(20) UNSIGNED NOT NULL COMMENT '领取用户 id',
   `sku_id` bigint(20) UNSIGNED NOT NULL COMMENT 'Token 包 SKU id',
   `token_amount` bigint(20) NOT NULL COMMENT '发放的 Token 额度（个），下单时快照',
-  `status` tinyint(4) NOT NULL DEFAULT 1 COMMENT '订单状态：0=待发放；1=已发放',
+  `status` tinyint(4) NOT NULL DEFAULT 1 COMMENT '订单状态：0=待发放；1=已发放；2=发放失败（终局失败留痕：抢购已承诺成功但 DB 终局拒绝/重试耗尽，供用户可见与对账退款）',
   `channel` tinyint(4) NOT NULL DEFAULT 1 COMMENT '发放渠道：1=拉新活动；2=企业团队共享池',
   `create_time` datetime DEFAULT NULL COMMENT '下单（抢购成功）时间',
   `grant_time` datetime DEFAULT NULL COMMENT '实际发放时间',

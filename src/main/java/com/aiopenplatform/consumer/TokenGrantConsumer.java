@@ -1,5 +1,6 @@
 package com.aiopenplatform.consumer;
 
+import com.aiopenplatform.entity.TokenOrder;
 import com.aiopenplatform.service.ITokenOrderService;
 import com.aiopenplatform.service.ITokenOrderService.GrantResult;
 import lombok.extern.slf4j.Slf4j;
@@ -9,7 +10,6 @@ import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.RedisSystemException;
 import org.springframework.data.redis.connection.stream.Consumer;
 import org.springframework.data.redis.connection.stream.MapRecord;
-import org.springframework.data.redis.connection.stream.ReadOffset;
 import org.springframework.data.redis.connection.stream.RecordId;
 import org.springframework.data.redis.connection.stream.StreamReadOptions;
 import org.springframework.data.redis.connection.stream.StreamOffset;
@@ -38,15 +38,24 @@ import static com.aiopenplatform.utils.RedisConstants.TOKEN_GRANT_STREAM_KEY;
  *     <li><b>手动 ACK</b>：处理成功才 XACK；处理失败不 ACK，消息进入 pending-list，
  *     由 {@link GrantPendingCompensator} 定时补偿重放；</li>
  *     <li><b>幂等</b>：Redisson 分布式锁保证同一用户的发放串行处理，
- *     DB 侧「订单 id 唯一 + 一人一份/限购校验 + 乐观锁（stock &gt; 0）」防止重复发放与超卖；</li>
- *     <li><b>失败补偿</b>：DB 校验不通过（库存不足/已领取）时回滚 Redis 预扣（恢复库存、移除用户、回退计数），
- *     保证 Redis 与 DB 库存一致。</li>
+ *     DB 侧「订单唯一（状态感知）+ 一人一份/限购校验 + 乐观锁（stock &gt; 0）」防止重复发放与超卖；</li>
+ *     <li><b>失败留痕</b>：DB 终局校验不通过（库存不足/SKU 消失）或重试耗尽时，
+ *     先落 status=2 失败订单（抢购接口已向用户承诺成功，留痕供用户可见/对账退款），再 ACK，不静默丢弃；</li>
+ *     <li><b>库存校正</b>：回滚 Redis 预扣按失败原因区分——重复领取等「DB 未扣减」场景 +1 精确归还；
+ *     库存不足等「DB 已无货」场景把 Redis 库存 SET 为 DB 实际值，避免幻影库存被反复误售；</li>
+ *     <li><b>可恢复异常即时重试</b>：DB/Redis 瞬时故障在进程内退避重试 {@link #MAX_ATTEMPTS} 次
+ *     后才抛出交给补偿器；consume 单条隔离，一条消息的瞬时异常不拖慢同批其余消息。</li>
  * </ul>
  * </p>
  */
 @Slf4j
 @Component
 public class TokenGrantConsumer {
+
+    /** 单条消息进程内最大尝试次数（针对 DB/Redis 可恢复异常；业务终局结果不抛异常、不重试） */
+    private static final int MAX_ATTEMPTS = 3;
+    /** 各次重试之间的退避毫秒数（第 i 次失败后等待 BACKOFF_MS[i]） */
+    private static final long[] BACKOFF_MS = {500L, 2000L};
 
     @Resource
     private ITokenOrderService tokenOrderService;
@@ -90,7 +99,9 @@ public class TokenGrantConsumer {
     }
 
     /**
-     * 轮询拉取新消息并处理（XREADGROUP），处理成功后手动 XACK
+     * 轮询拉取新消息并处理（XREADGROUP），处理成功后手动 XACK；
+     * 单条失败仅记录并跳过，不中断同批其余消息（失败消息不 ACK、留在 pending-list，
+     * 由 {@link GrantPendingCompensator} 认领重试）
      */
     @Scheduled(fixedDelay = 150, initialDelay = 5000)
     public void consume() {
@@ -102,17 +113,22 @@ public class TokenGrantConsumer {
             return;
         }
         for (MapRecord<String, Object, Object> record : records) {
-            Map<Object, Object> value = record.getValue();
-            Long orderId = Long.valueOf(String.valueOf(value.get("orderId")));
-            Long skuId = Long.valueOf(String.valueOf(value.get("skuId")));
-            Long userId = Long.valueOf(String.valueOf(value.get("userId")));
-            int limitCount = Integer.parseInt(String.valueOf(value.get("limitCount")));
-            processRecord(record.getId().getValue(), orderId, skuId, userId, limitCount);
+            try {
+                Map<Object, Object> value = record.getValue();
+                Long orderId = Long.valueOf(String.valueOf(value.get("orderId")));
+                Long skuId = Long.valueOf(String.valueOf(value.get("skuId")));
+                Long userId = Long.valueOf(String.valueOf(value.get("userId")));
+                int limitCount = Integer.parseInt(String.valueOf(value.get("limitCount")));
+                processRecord(record.getId().getValue(), orderId, skuId, userId, limitCount);
+            } catch (Exception e) {
+                // 不 ACK：消息留在 pending-list 由补偿器稍后认领；本批其余消息继续处理
+                log.error("发放消息处理失败（保留 pending 待补偿）: messageId={}", record.getId().getValue(), e);
+            }
         }
     }
 
     /**
-     * 处理一条发放消息：Redisson 锁 → 幂等落库 → XACK（消费与补偿共用）
+     * 处理一条发放消息：Redisson 锁 → 幂等落库 → 失败留痕/库存校正 → XACK（消费与补偿共用）
      *
      * @param messageId  Stream 消息 id（用于 ACK）
      * @param orderId    发放订单 id
@@ -135,28 +151,92 @@ public class TokenGrantConsumer {
             throw new RuntimeException("获取发放锁失败，稍后重试: userId=" + userId);
         }
         try {
-            GrantResult result = tokenOrderService.grantTokenOrder(orderId, skuId, userId);
-            if (result == GrantResult.DUPLICATE_ALREADY_GRANTED || result == GrantResult.STOCK_NOT_ENOUGH) {
-                // DB 校验不通过（已领取/库存不足）：回滚 Redis 预扣，保持 Redis 与 DB 库存一致
-                rollbackGrant(orderId, skuId, userId, limitCount);
-            }
-            // 处理完成（成功/重复消息/已回滚），ACK
-            stringRedisTemplate.opsForStream().acknowledge(TOKEN_GRANT_STREAM_KEY, TOKEN_GRANT_GROUP, messageId);
-            log.info("发放消息处理完成并 ACK: messageId={}, orderId={}, result={}", messageId, orderId, result);
-        } catch (Exception e) {
-            // 不 ACK：消息进入 pending-list，由补偿任务重放
-            log.error("发放消息处理异常，等待补偿重试: orderId={}", orderId, e);
-            throw e;
+            handleWithTransientRetry(messageId, orderId, skuId, userId, limitCount);
         } finally {
             lock.unlock();
         }
     }
 
     /**
-     * 订单是否已落库（发放成功/幂等判断用；死信补偿前先确认，避免对已发放订单误回滚预扣）
+     * 带即时重试的处理入口：业务终局结果（成功/幂等/终局失败）不抛异常；
+     * 仅 DB/Redis 等可恢复异常在进程内退避重试 {@link #MAX_ATTEMPTS} 次，耗尽后抛出
+     * （消息不 ACK，由补偿器定时兜底，避免瞬时故障直接进入 60s+ 的补偿等待）
      */
-    public boolean orderExists(Long orderId) {
-        return tokenOrderService.getById(orderId) != null;
+    private void handleWithTransientRetry(String messageId, Long orderId, Long skuId, Long userId, int limitCount) {
+        RuntimeException lastEx = null;
+        for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            try {
+                handleOnce(messageId, orderId, skuId, userId, limitCount);
+                return;
+            } catch (RuntimeException e) {
+                lastEx = e;
+                log.warn("发放处理异常（可恢复类，第 {}/{} 次尝试）: orderId={}, err={}",
+                        attempt, MAX_ATTEMPTS, orderId, e.getMessage());
+                if (attempt < MAX_ATTEMPTS) {
+                    sleepBackoff(BACKOFF_MS[attempt - 1]);
+                }
+            }
+        }
+        throw lastEx;
+    }
+
+    /**
+     * 单条消息的一次完整处理：幂等落库 + 按结果分支处理（回滚/留痕/校正），最后 ACK
+     */
+    private void handleOnce(String messageId, Long orderId, Long skuId, Long userId, int limitCount) {
+        GrantResult result = tokenOrderService.grantTokenOrder(orderId, skuId, userId);
+        switch (result) {
+            case SUCCESS:
+            case DUPLICATE_MSG:
+                // 发放已落库 / 重复投递幂等（订单已发放）：无需回滚
+                break;
+            case DUPLICATE_ALREADY_GRANTED:
+                // 用户此前已成功领取：DB 未扣减该笔，预扣 +1 精确归还即可
+                rollbackGrant(orderId, skuId, userId, limitCount, null);
+                break;
+            case STOCK_NOT_ENOUGH:
+                // DB 终局拒绝且已无货：先失败订单留痕（用户可见/可退款），再把 Redis 库存
+                // 校正为 DB 实际值——此处若 +1 归还，只会留下被下一个用户反复误购的幻影库存
+                failGrantAndReconcileStock(orderId, skuId, userId, limitCount);
+                break;
+            case SKU_NOT_EXISTS:
+                // SKU 已删除：无法留痕（金额缺失），回滚预扣归还；Redis 残留键由人工清理
+                log.error("发放订单对应 SKU 已不存在，回滚预扣后 ACK（需人工核查残留库存键）: orderId={}, skuId={}",
+                        orderId, skuId);
+                rollbackGrant(orderId, skuId, userId, limitCount, null);
+                break;
+            case ALREADY_FAILED:
+                // 订单已终局失败留痕（死信路径中断后的重投递等）：回滚预扣收尾即可
+                rollbackGrant(orderId, skuId, userId, limitCount, null);
+                break;
+            default:
+                throw new IllegalStateException("未知发放结果: " + result);
+        }
+        // 处理完成（成功/幂等跳过/已留痕回滚），ACK
+        stringRedisTemplate.opsForStream().acknowledge(TOKEN_GRANT_STREAM_KEY, TOKEN_GRANT_GROUP, messageId);
+        log.info("发放消息处理完成并 ACK: messageId={}, orderId={}, result={}", messageId, orderId, result);
+    }
+
+    /** 库存不足终局失败：失败订单留痕 + 按 DB 实际库存校正 Redis（不可用时回退 +1 归还） */
+    private void failGrantAndReconcileStock(Long orderId, Long skuId, Long userId, int limitCount) {
+        Integer dbStock = tokenOrderService.handleTerminalGrantFailure(orderId, skuId, userId);
+        rollbackGrant(orderId, skuId, userId, limitCount, dbStock == null ? null : dbStock.longValue());
+    }
+
+    /**
+     * 订单是否已发放成功（幂等/死信判断用；status=2 失败留痕订单不算已发放，不拦截回滚收尾）
+     */
+    public boolean orderGranted(Long orderId) {
+        TokenOrder order = tokenOrderService.getById(orderId);
+        return order != null && order.getStatus() != null
+                && order.getStatus() == ITokenOrderService.STATUS_GRANTED;
+    }
+
+    /**
+     * 记录 status=2 失败订单（死信丢弃前留痕，防“抢购成功却拿不到 Token”被静默丢弃）
+     */
+    public void recordFailedOrder(Long orderId, Long skuId, Long userId) {
+        tokenOrderService.recordFailedOrder(orderId, skuId, userId);
     }
 
     /**
@@ -164,11 +244,25 @@ public class TokenGrantConsumer {
      * <p>
      * 脚本以 orderId 的 SETNX 标记保证同一订单只回滚一次：消息重投递、
      * 死信补偿与消费处理并发时不会重复恢复库存。
+     *
+     * @param syncStock 库存校正目标：null 表示 +1 精确归还（重复领取/死信等 DB 未扣减场景）；
+     *                  非 null 表示把 Redis 库存 SET 为 DB 实际值（DB 库存不足等已无货场景）
      */
-    public void rollbackGrant(Long orderId, Long skuId, Long userId, int limitCount) {
+    public void rollbackGrant(Long orderId, Long skuId, Long userId, int limitCount, Long syncStock) {
         Long result = stringRedisTemplate.execute(ROLLBACK_SCRIPT, Collections.emptyList(),
                 String.valueOf(skuId), String.valueOf(userId), String.valueOf(limitCount),
-                String.valueOf(orderId), String.valueOf(TOKEN_COUNT_TTL));
-        log.warn("已回滚 Redis 预扣: orderId={}, skuId={}, userId={}, applied={}", orderId, skuId, userId, result);
+                String.valueOf(orderId), String.valueOf(TOKEN_COUNT_TTL),
+                String.valueOf(syncStock == null ? -1L : syncStock));
+        log.warn("已回滚 Redis 预扣: orderId={}, skuId={}, userId={}, applied={}, syncStock={}",
+                orderId, skuId, userId, result, syncStock);
+    }
+
+    private static void sleepBackoff(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("发放重试等待被中断", e);
+        }
     }
 }

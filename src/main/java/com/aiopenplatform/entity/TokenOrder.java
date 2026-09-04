@@ -47,7 +47,8 @@ public class TokenOrder implements Serializable {
     private Long tokenAmount;
 
     /**
-     * 订单状态：0=待发放；1=已发放
+     * 订单状态：0=待发放；1=已发放；2=发放失败（终局失败留痕：抢购接口已承诺成功，
+     * 但 DB 终局拒绝（库存不足等）或重试耗尽；供用户可见与对账退款）
      */
     private Integer status;
 
