@@ -5,6 +5,7 @@ import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
@@ -13,6 +14,7 @@ import org.springframework.stereotype.Component;
 import javax.annotation.Resource;
 import java.util.Collections;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
@@ -23,7 +25,8 @@ import static com.aiopenplatform.utils.RedisConstants.CACHE_INVALIDATE_CHANNEL;
  * 多级缓存读写服务：ScopeCaching(L0) -&gt; JVM Caffeine(L1) -&gt; Redis(L2) -&gt; MySQL(L3)
  * <p>
  * 读链路：请求进来逐级查询，未命中则回源下一级，最终回源 MySQL（loader）；
- * 回源成功后逐级写回。Redis 层用 SETNX 互斥锁防缓存击穿，空值短 TTL 防穿透。
+ * 回源成功后逐级写回。Redis 层用 SETNX 互斥锁防缓存击穿，空值短 TTL 防穿透，
+ * 写入时对 TTL 做 ±jitter% 随机抖动防雪崩（同一批 key 不再集中过期）。
  * 写链路：业务代码只写 MySQL，缓存同步交给 Canal（binlog 驱动），
  * 本类提供 writeThrough / delete 供 Canal 监听器使用；canal 关闭时由业务代码调用兜底。
  * </p>
@@ -34,6 +37,10 @@ public class MultiLevelCacheService {
 
     /** Redis 空值缓存标记（防穿透） */
     private static final String CACHE_NULL_MARK = "";
+
+    /** Redis 缓存 TTL 随机抖动幅度（±%，防雪崩；0 = 关闭，退化为固定 TTL） */
+    @Value("${cache.ttl-jitter-percent:10}")
+    private int ttlJitterPercent;
 
     @Resource
     private ScopeCaching scopeCaching;
@@ -128,7 +135,7 @@ public class MultiLevelCacheService {
                 return null;
             }
             String json = JSONUtil.toJsonStr(t);
-            stringRedisTemplate.opsForValue().set(key, json, redisTtlSec, TimeUnit.SECONDS);
+            stringRedisTemplate.opsForValue().set(key, json, jitterTtl(redisTtlSec), TimeUnit.SECONDS);
             writeBackToUpperLevels(cacheName, key, t, json);
             log.debug("【缓存回源 MySQL 并逐级写回】key={}", key);
             return t;
@@ -140,6 +147,21 @@ public class MultiLevelCacheService {
                 releaseLock(lockKey, token);
             }
         }
+    }
+
+    /**
+     * TTL 随机抖动（防缓存雪崩）：在基础 TTL 上叠加 ±jitter% 的随机偏移，
+     * 让同一批写入的 key（Redis 重启后批量回源、Canal 批量写透传、预热脚本）
+     * 过期时间被打散，避免集中失效瞬间请求全部打穿到 MySQL。
+     * <p>空值缓存（防穿透）按请求时间天然错峰，不参与抖动。</p>
+     */
+    private long jitterTtl(Long redisTtlSec) {
+        long ttl = redisTtlSec == null ? 0 : redisTtlSec;
+        if (ttl <= 0 || ttlJitterPercent <= 0) {
+            return Math.max(ttl, 1);
+        }
+        double factor = 1 + ThreadLocalRandom.current().nextDouble(-ttlJitterPercent, ttlJitterPercent) / 100.0;
+        return Math.max((long) (ttl * factor), 1);
     }
 
     /**
@@ -169,7 +191,7 @@ public class MultiLevelCacheService {
      */
     public void writeThrough(String cacheName, String key, Object value, Long redisTtlSec) {
         String json = JSONUtil.toJsonStr(value);
-        stringRedisTemplate.opsForValue().set(key, json, redisTtlSec, TimeUnit.SECONDS);
+        stringRedisTemplate.opsForValue().set(key, json, jitterTtl(redisTtlSec), TimeUnit.SECONDS);
         publishInvalidate(cacheName, key);
         log.info("【binlog 写透传】cacheName={}, key={}", cacheName, key);
     }

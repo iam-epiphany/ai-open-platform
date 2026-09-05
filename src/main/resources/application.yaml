@@ -40,6 +40,11 @@ canal:
   # 注意：YAML plain scalar 不做转义，此处为单反斜杠（Java 正则中 \. 匹配字面点）
   filter: token_platform\.tb_token_.*
 
+# ============ 缓存 ============
+# Redis 数据缓存 TTL 随机抖动幅度（±%，防缓存雪崩：同一批写入 key 的过期时间被打散，不会集中失效），0 表示关闭
+cache:
+  ttl-jitter-percent: 10
+
 # ============ 应用配置 ============
 app:
   # 图片上传根目录（相对项目根目录，与 nginx 前端静态目录一致）
